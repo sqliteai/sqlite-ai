@@ -28,7 +28,7 @@ MAKEFLAGS += -j$(CPUS)
 CC = gcc
 CXX = g++
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include
-LDFLAGS = -L./$(BUILD_DIR)/lib/common -L./$(BUILD_DIR)/lib/ggml/src -L./$(BUILD_DIR)/lib/ggml/src/ggml-blas -L./$(BUILD_DIR)/lib/src -lcommon -lggml -lggml-blas -lggml-base -lggml-cpu -lllama
+LDFLAGS = -L./$(BUILD_DIR)/lib/common -L./$(BUILD_DIR)/lib/ggml/src -L./$(BUILD_DIR)/lib/src -lcommon -lggml -lggml-base -lggml-cpu -lllama
 LLAMA_OPTIONS = -DLLAMA_CURL=OFF
 
 # Directories
@@ -43,7 +43,6 @@ SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC_FILES)))
 LIBS = $(BUILD_DIR)/lib/common/libcommon.a \
 	   $(BUILD_DIR)/lib/ggml/src/libggml.a \
-	   $(BUILD_DIR)/lib/ggml/src/ggml-blas/libggml-blas.a \
 	   $(BUILD_DIR)/lib/ggml/src/libggml-base.a \
 	   $(BUILD_DIR)/lib/ggml/src/libggml-cpu.a \
 	   $(BUILD_DIR)/lib/src/libllama.a
@@ -56,8 +55,8 @@ ifeq ($(PLATFORM),windows)
     DEF_FILE := $(BUILD_DIR)/ai.def
 else ifeq ($(PLATFORM),macos)
     TARGET := $(DIST_DIR)/ai.dylib
-    LIBS += $(BUILD_DIR)/lib/ggml/src/ggml-metal/libggml-metal.a
-    LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_DIR)/lib/ggml/src/ggml-metal -lggml-metal -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -dynamiclib -undefined dynamic_lookup
+    LIBS += $(BUILD_DIR)/lib/ggml/src/ggml-metal/libggml-metal.a $(BUILD_DIR)/lib/ggml/src/ggml-blas/libggml-blas.a
+    LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_DIR)/lib/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_DIR)/lib/ggml/src/ggml-blas -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -dynamiclib -undefined dynamic_lookup
     CFLAGS += -arch x86_64 -arch arm64
     LLAMA_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 else ifeq ($(PLATFORM),android)
@@ -96,7 +95,6 @@ else ifeq ($(PLATFORM),isim)
 else # linux
     TARGET := $(DIST_DIR)/ai.so
     LDFLAGS += -shared
-    LLAMA_OPTIONS += -DGGML_USE_BLAS=ON
 endif
 
 # Windows .def file generation
