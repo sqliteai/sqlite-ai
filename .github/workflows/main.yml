@@ -94,7 +94,7 @@ jobs:
           export ${{ matrix.make }}
           $ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.arch }}-linux-android26-clang sqlite-amalgamation-*/shell.c sqlite-amalgamation-*/sqlite3.c -o sqlite3 -ldl
           # remove unused folders to save up space
-          rm -rf sqlite-amalgamation-*.zip sqlite-amalgamation-* openssl
+          rm -rf sqlite-amalgamation-*.zip sqlite-amalgamation-*
           echo "::endgroup::"
 
           echo "::group::prepare the test script"
@@ -104,6 +104,8 @@ jobs:
             cd /data/local/tmp
             $(make test PLATFORM=$PLATFORM ARCH=$ARCH -n)
           EOF
+          # remove big unused folders to avoid emulator errors
+          rm -rf build modules
           echo "::endgroup::"
 
       - name: android test sqlite-ai
