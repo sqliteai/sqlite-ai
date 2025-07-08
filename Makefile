@@ -135,7 +135,7 @@ $(BUILD_DIR)/%.o: %.c
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
 
 test: $(TARGET)
-	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./$<" "SELECT ai_version();"
+	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
 
 # Build submodules
 ifneq ($(PLATFORM),windows)
