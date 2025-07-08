@@ -28,8 +28,8 @@ MAKEFLAGS += -j$(CPUS)
 CC = gcc
 CXX = g++
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include
-LDFLAGS = -L./$(BUILD_DIR)/lib/common -L./$(BUILD_DIR)/lib/ggml/src -L./$(BUILD_DIR)/lib/src -lcommon -lggml -lggml-base -lggml-cpu -lllama
-LLAMA_OPTIONS = -DLLAMA_CURL=OFF
+LDFLAGS = -L./$(BUILD_DIR)/lib/common -L./$(BUILD_DIR)/lib/ggml/src -L./$(BUILD_DIR)/lib/ggml/src/ggml-blas -L./$(BUILD_DIR)/lib/src -lcommon -lggml -lggml-blas -lggml-base -lggml-cpu -lllama
+LLAMA_OPTIONS = -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF
 
 # Directories
 SRC_DIR = src
@@ -43,6 +43,7 @@ SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC_FILES)))
 LIBS = $(BUILD_DIR)/lib/common/libcommon.a \
 	   $(BUILD_DIR)/lib/ggml/src/libggml.a \
+	   $(BUILD_DIR)/lib/ggml/src/ggml-blas/libggml-blas.a \
 	   $(BUILD_DIR)/lib/ggml/src/libggml-base.a \
 	   $(BUILD_DIR)/lib/ggml/src/libggml-cpu.a \
 	   $(BUILD_DIR)/lib/src/libllama.a
@@ -55,8 +56,8 @@ ifeq ($(PLATFORM),windows)
     DEF_FILE := $(BUILD_DIR)/ai.def
 else ifeq ($(PLATFORM),macos)
     TARGET := $(DIST_DIR)/ai.dylib
-    LIBS += $(BUILD_DIR)/lib/ggml/src/ggml-metal/libggml-metal.a $(BUILD_DIR)/lib/ggml/src/ggml-blas/libggml-blas.a
-    LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_DIR)/lib/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_DIR)/lib/ggml/src/ggml-blas -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -dynamiclib -undefined dynamic_lookup
+    LIBS += $(BUILD_DIR)/lib/ggml/src/ggml-metal/libggml-metal.a
+    LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_DIR)/lib/ggml/src/ggml-metal -lggml-metal -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -dynamiclib -undefined dynamic_lookup
     CFLAGS += -arch x86_64 -arch arm64
     LLAMA_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 else ifeq ($(PLATFORM),android)
@@ -82,19 +83,20 @@ else ifeq ($(PLATFORM),android)
     LDFLAGS += -shared
 else ifeq ($(PLATFORM),ios)
     TARGET := $(DIST_DIR)/ai.dylib
-    SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=11.0
-    LDFLAGS += -dynamiclib $(SDK)
+    SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
+    LDFLAGS += -framework Accelerate -framework Metal -dynamiclib $(SDK)
     CFLAGS += -arch arm64 $(SDK)
-    LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS
+    LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
 else ifeq ($(PLATFORM),isim)
     TARGET := $(DIST_DIR)/ai.dylib
-    SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=11.0
-    LDFLAGS += -arch x86_64 -arch arm64 -dynamiclib $(SDK)
+    SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=14.0
+    LDFLAGS += -arch x86_64 -arch arm64 -framework Accelerate -framework Metal -dynamiclib $(SDK)
     CFLAGS += -arch x86_64 -arch arm64 $(SDK)
-    LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+    LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 else # linux
     TARGET := $(DIST_DIR)/ai.so
     LDFLAGS += -shared
+    LLAMA_OPTIONS += -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 endif
 
 # Windows .def file generation
