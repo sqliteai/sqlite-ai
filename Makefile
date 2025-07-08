@@ -56,9 +56,9 @@ ifeq ($(PLATFORM),windows)
 else ifeq ($(PLATFORM),macos)
     TARGET := $(DIST_DIR)/ai.dylib
     LIBS += $(BUILD_DIR)/lib/ggml/src/ggml-metal/libggml-metal.a
-    LDFLAGS += -L./$(BUILD_DIR)/lib/ggml/src/ggml-metal -lggml-metal -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -dynamiclib -undefined dynamic_lookup
-    #LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_DIR)/lib/ggml/src/ggml-metal -lggml-metal
-    #CFLAGS += -arch x86_64 -arch arm64
+    LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_DIR)/lib/ggml/src/ggml-metal -lggml-metal -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -dynamiclib -undefined dynamic_lookup
+    CFLAGS += -arch x86_64 -arch arm64
+    LLAMA_OPTIONS = -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 else ifeq ($(PLATFORM),android)
     # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
     ifeq ($(filter %,$(ARCH)),)
@@ -127,9 +127,8 @@ test: $(TARGET)
 
 # Build all libraries at once using one CMake call
 build/libs.stamp:
-	#-DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	cd $(BUILD_DIR) && \
-	cmake -B lib -DBUILD_SHARED_LIBS=OFF ../$(LLAMA_DIR) && \
+	cmake -B lib -DBUILD_SHARED_LIBS=OFF $(LLAMA_OPTIONS) ../$(LLAMA_DIR) && \
 	cmake --build lib --config Release -- -j$(CPUS)
 	touch $@
 
