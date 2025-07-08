@@ -54,6 +54,7 @@ ifeq ($(PLATFORM),windows)
     LDFLAGS += -shared
     # Create .def file for Windows
     DEF_FILE := $(BUILD_DIR)/ai.def
+    STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
     TARGET := $(DIST_DIR)/ai.dylib
     LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
@@ -61,6 +62,7 @@ else ifeq ($(PLATFORM),macos)
     CFLAGS += -arch x86_64 -arch arm64
     LLAMA_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
     WHISPER_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
+    STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),android)
     # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
     ifeq ($(filter %,$(ARCH)),)
@@ -85,6 +87,7 @@ else ifeq ($(PLATFORM),android)
     LDFLAGS += -static-libstdc++ -shared
     LLAMA_OPTIONS += -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     WHISPER_OPTIONS += -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    STRIP = $(BIN)/llvm-strip --strip-unneeded $@
 else ifeq ($(PLATFORM),ios)
     TARGET := $(DIST_DIR)/ai.dylib
     SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
@@ -93,6 +96,7 @@ else ifeq ($(PLATFORM),ios)
     CFLAGS += -arch arm64 $(SDK)
     LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
     WHISPER_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DWHISPER_COREML=ON
+    STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),isim)
     TARGET := $(DIST_DIR)/ai.dylib
     SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=14.0
@@ -106,6 +110,7 @@ else # linux
     LDFLAGS += -shared
     LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    STRIP = strip --strip-unneeded $@
 endif
 
 # Windows .def file generation
@@ -130,10 +135,8 @@ ifeq ($(PLATFORM),windows)
     # Generate import library for Windows
 	dlltool -D $@ -d $(DEF_FILE) -l $(DIST_DIR)/ai.lib
 endif
-ifeq ($(PLATFORM),android)
-    # Android strip debug symbols
-	$(BIN)/llvm-strip --strip-unneeded $@
-endif
+    # Strip debug symbols
+	$(STRIP)
 
 # Object files
 $(BUILD_DIR)/%.o: %.c
