@@ -80,10 +80,12 @@ else ifeq ($(PLATFORM),android)
     endif
 
     CC = $(BIN)/$(ARCH)-linux-android26-clang
+    CXX = $(CC)++
     TARGET := $(DIST_DIR)/ai.so
     LDFLAGS += -shared
-    LLAMA_OPTIONS += -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-    WHISPER_OPTIONS += -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    LLAMA_OPTIONS += -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=armv8.7a" -DCMAKE_CXX_FLAGS="-march=armv8.7a" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    WHISPER_OPTIONS += -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=armv8.7a" -DCMAKE_CXX_FLAGS="-march=armv8.7a" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+
 else ifeq ($(PLATFORM),ios)
     TARGET := $(DIST_DIR)/ai.dylib
     SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
