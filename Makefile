@@ -28,8 +28,9 @@ MAKEFLAGS += -j$(CPUS)
 CC = gcc
 CXX = g++
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include
-LDFLAGS = -L./$(BUILD_DIR)/lib/common -L./$(BUILD_DIR)/lib/ggml/src -L./$(BUILD_DIR)/lib/ggml/src/ggml-blas -L./$(BUILD_DIR)/lib/src -lcommon -lggml -lggml-blas -lggml-base -lggml-cpu -lllama
+LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_WHISPER)/src -lcommon -lggml -lggml-base -lggml-cpu -lllama -lwhisper
 LLAMA_OPTIONS = -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF
+WHISPER_OPTIONS = -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF
 
 # Directories
 SRC_DIR = src
@@ -37,16 +38,15 @@ DIST_DIR = dist
 VPATH = $(SRC_DIR)
 BUILD_DIR = build
 LLAMA_DIR = modules/llama.cpp
+WHISPER_DIR = modules/whisper.cpp
+BUILD_LLAMA = $(BUILD_DIR)/llama.cpp
+BUILD_WHISPER = $(BUILD_DIR)/whisper.cpp
 
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC_FILES)))
-LIBS = $(BUILD_DIR)/lib/common/libcommon.a \
-	   $(BUILD_DIR)/lib/ggml/src/libggml.a \
-	   $(BUILD_DIR)/lib/ggml/src/ggml-blas/libggml-blas.a \
-	   $(BUILD_DIR)/lib/ggml/src/libggml-base.a \
-	   $(BUILD_DIR)/lib/ggml/src/libggml-cpu.a \
-	   $(BUILD_DIR)/lib/src/libllama.a
+LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/ggml/src/libggml.a $(BUILD_LLAMA)/ggml/src/libggml-base.a $(BUILD_LLAMA)/ggml/src/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
+WHISPER_LIBS = $(BUILD_WHISPER)/src/libwhisper.a
 
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
@@ -56,10 +56,11 @@ ifeq ($(PLATFORM),windows)
     DEF_FILE := $(BUILD_DIR)/ai.def
 else ifeq ($(PLATFORM),macos)
     TARGET := $(DIST_DIR)/ai.dylib
-    LIBS += $(BUILD_DIR)/lib/ggml/src/ggml-metal/libggml-metal.a
-    LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_DIR)/lib/ggml/src/ggml-metal -lggml-metal -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -dynamiclib -undefined dynamic_lookup
+    LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
+    LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -dynamiclib -undefined dynamic_lookup
     CFLAGS += -arch x86_64 -arch arm64
     LLAMA_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+    WHISPER_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 else ifeq ($(PLATFORM),android)
     # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
     ifeq ($(filter %,$(ARCH)),)
@@ -84,19 +85,24 @@ else ifeq ($(PLATFORM),android)
 else ifeq ($(PLATFORM),ios)
     TARGET := $(DIST_DIR)/ai.dylib
     SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
-    LDFLAGS += -framework Accelerate -framework Metal -dynamiclib $(SDK)
+    LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
+    LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -dynamiclib $(SDK)
     CFLAGS += -arch arm64 $(SDK)
     LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+    WHISPER_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
 else ifeq ($(PLATFORM),isim)
     TARGET := $(DIST_DIR)/ai.dylib
     SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=14.0
-    LDFLAGS += -arch x86_64 -arch arm64 -framework Accelerate -framework Metal -dynamiclib $(SDK)
+    LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
+    LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -dynamiclib $(SDK)
     CFLAGS += -arch x86_64 -arch arm64 $(SDK)
-    LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+    LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+    WHISPER_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 else # linux
     TARGET := $(DIST_DIR)/ai.so
     LDFLAGS += -shared
     LLAMA_OPTIONS += -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    WHISPER_OPTIONS += -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 endif
 
 # Windows .def file generation
@@ -115,7 +121,7 @@ extension: $(TARGET)
 all: $(TARGET) 
 
 # Loadable library
-$(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LIBS)
+$(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS)
 	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
     # Generate import library for Windows
@@ -130,12 +136,18 @@ test: $(TARGET)
 	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./$<" "SELECT ai_version();"
 
 # Build all libraries at once using one CMake call
-build/libs.stamp:
-	cmake -B $(BUILD_DIR)/lib -DBUILD_SHARED_LIBS=OFF $(LLAMA_OPTIONS) $(LLAMA_DIR)
-	cmake --build $(BUILD_DIR)/lib --config Release -- -j$(CPUS)
+build/llama.cpp.stamp:
+	cmake -B $(BUILD_LLAMA) -DBUILD_SHARED_LIBS=OFF $(LLAMA_OPTIONS) $(LLAMA_DIR)
+	cmake --build $(BUILD_LLAMA) --config Release -- -j$(CPUS)
 	touch $@
 
-$(LIBS): build/libs.stamp
+build/whisper.cpp.stamp:
+	cmake -B $(BUILD_WHISPER) -DBUILD_SHARED_LIBS=OFF $(WHISPER_OPTIONS) $(WHISPER_DIR)
+	cmake --build $(BUILD_WHISPER) --config Release -- -j$(CPUS)
+	touch $@
+
+$(LLAMA_LIBS): build/llama.cpp.stamp
+$(WHISPER_LIBS): build/whisper.cpp.stamp
 
 # Tools
 version:
