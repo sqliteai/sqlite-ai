@@ -60,7 +60,13 @@ jobs:
             mingw-w64-x86_64-cc
             make
 
+      - name: windows build sqlite-ai
+        if: matrix.name == 'windows'
+        run: make extension ${{ matrix.make && matrix.make || ''}}
+        shell: msys2 {0}
+
       - name: build sqlite-ai
+        if: matrix.name != 'windows'
         run: make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows install sqlite3
