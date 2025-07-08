@@ -96,6 +96,7 @@ else ifeq ($(PLATFORM),isim)
 else # linux
     TARGET := $(DIST_DIR)/ai.so
     LDFLAGS += -shared
+    LLAMA_OPTIONS += -DGGML_USE_BLAS=ON
 endif
 
 # Windows .def file generation
