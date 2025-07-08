@@ -82,6 +82,8 @@ else ifeq ($(PLATFORM),android)
     CC = $(BIN)/$(ARCH)-linux-android26-clang
     TARGET := $(DIST_DIR)/ai.so
     LDFLAGS += -shared
+    LLAMA_OPTIONS += -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    WHISPER_OPTIONS += -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 else ifeq ($(PLATFORM),ios)
     TARGET := $(DIST_DIR)/ai.dylib
     SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
