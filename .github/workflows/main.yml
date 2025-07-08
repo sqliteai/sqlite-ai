@@ -58,6 +58,7 @@ jobs:
           msystem: mingw64
           install: >-
             mingw-w64-x86_64-cc
+            mingw-w64-x86_64-cmake
             make
 
       - name: windows build sqlite-ai
