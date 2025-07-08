@@ -52,6 +52,14 @@ jobs:
         with:
           submodules: true
 
+      - uses: msys2/setup-msys2@v2.27.0
+        if: matrix.os == 'windows-latest'
+        with:
+          msystem: mingw64
+          install: >-
+            mingw-w64-x86_64-cc
+            make
+
       - name: build sqlite-ai
         run: make extension ${{ matrix.make && matrix.make || ''}}
 
