@@ -11,13 +11,31 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <objbase.h>
+#include <bcrypt.h>
+#include <ntstatus.h> //for STATUS_SUCCESS
+#else
+#include <unistd.h>
+#if defined(__APPLE__)
+#include <Security/Security.h>
+#elif !defined(__ANDROID__)
+#include <sys/random.h>
+#endif
+#endif
+
+#ifndef SQLITE_CORE
+SQLITE_EXTENSION_INIT3
+#endif
+
 #define SKIP_SPACES(_p)                         while (*(_p) && isspace((unsigned char)*(_p))) (_p)++
 #define TRIM_TRAILING(_start, _len)             while ((_len) > 0 && isspace((unsigned char)(_start)[(_len) - 1])) (_len)--
 #define MIN_BUFFER_SIZE                         4096
+#define UUID_LEN                                16
 
 // defined in sqlite-ai.c
 bool ai_model_check (sqlite3_context *context);
-// bool is_sqlite_344_or_higher;
 
 // MARK: -
 
@@ -33,18 +51,25 @@ bool buffer_create (buffer_t *b, uint32_t size) {
     return true;
 }
 
-bool buffer_append (buffer_t *b, const char *data, uint32_t len) {
-    if (b->length + len > b->capacity) {
-        uint32_t new_capacity = b->length + len + MIN_BUFFER_SIZE;
-        char *clone = sqlite3_realloc(b->data, new_capacity);
-        if (!clone) return false;
-        
-        b->data = clone;
-        b->capacity = new_capacity;
+bool buffer_resize (buffer_t *b, uint32_t new_capacity) {
+    char *clone = sqlite3_realloc(b->data, new_capacity);
+    if (!clone) return false;
+    
+    b->data = clone;
+    b->capacity = new_capacity;
+    
+    return true;
+}
+
+bool buffer_append (buffer_t *b, const char *data, uint32_t len, bool zero_terminate) {
+    if (b->length + len + 1> b->capacity) {
+        uint32_t new_capacity = b->length + len + 1 + MIN_BUFFER_SIZE;
+        if (buffer_resize(b, new_capacity) == false) return false;
     }
     
     memcpy(b->data + b->length, data, len);
     b->length += len;
+    if (zero_terminate) b->data[b->length] = 0;
     
     return true;
 }
@@ -54,6 +79,7 @@ void buffer_destroy (buffer_t *b) {
         sqlite3_free(b->data);
         b->data = NULL;
     }
+    b->data = NULL;
     b->capacity = 0;
     b->length = 0;
 }
@@ -231,7 +257,7 @@ bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, in
     
     if (check_model) {
         if (ai_model_check(context) == false) {
-            sqlite_context_result_error(context, SQLITE_MISUSE, "A model must be set!"); // TODO: improve me
+            sqlite_context_result_error(context, SQLITE_MISUSE, "No model is currently set. Please call ai_model_set() before using this function.");
             return false;
         }
     }
@@ -299,37 +325,67 @@ char *sqlite_strdup (const char *str) {
     return result;
 }
 
-
 // MARK: -
 
-/*
-bool sqlite_set_ptr (sqlite3 *db, void *ptr) {
-    if (is_sqlite_344_or_higher) {
-        return (sqlite3_set_clientdata(db, HASH_KEY_AI, ptr, NULL) == SQLITE_OK);
-    }
-    return (llist_set(&llist, db, ptr) == 0);
-}
-
-void *sqlite_get_ptr (sqlite3 *db) {
-    if (is_sqlite_344_or_higher) {
-        return sqlite3_get_clientdata(db, HASH_KEY_AI);
-    }
-    return llist_get(&llist, db);
-}
-
-void sqlite_clear_ptr (sqlite3 *db) {
-    llist_remove(&llist, db);
-}
-
-bool sqlite_utils_init (void) {
-    is_sqlite_344_or_higher = (sqlite3_libversion_number() >= 3044000);
+int ai_uuid_v7_generate (uint8_t value[UUID_LEN]) {
+    // fill the buffer with high-quality random data
+    #ifdef _WIN32
+    if (BCryptGenRandom(NULL, (BYTE*)value, UUID_LEN, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != STATUS_SUCCESS) return -1;
+    #elif defined(__APPLE__)
+    // Use SecRandomCopyBytes for macOS/iOS
+    if (SecRandomCopyBytes(kSecRandomDefault, UUID_LEN, value) != errSecSuccess) return -1;
+    #elif defined(__ANDROID__)
+    //arc4random_buf doesn't have a return value to check for success
+    arc4random_buf(value, UUID_LEN);
+    #else
+    if (getentropy(value, UUID_LEN) != 0) return -1;
+    #endif
     
-    llist.mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_APP1);
-    if (llist.mutex == NULL) return false;
+    // get current timestamp in ms
+    struct timespec ts;
+    #ifdef __ANDROID__
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) return -1;
+    #else
+    if (timespec_get(&ts, TIME_UTC) == 0) return -1;
+    #endif
     
-    return true;
+    // add timestamp part to UUID
+    uint64_t timestamp = (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    value[0] = (timestamp >> 40) & 0xFF;
+    value[1] = (timestamp >> 32) & 0xFF;
+    value[2] = (timestamp >> 24) & 0xFF;
+    value[3] = (timestamp >> 16) & 0xFF;
+    value[4] = (timestamp >> 8) & 0xFF;
+    value[5] = timestamp & 0xFF;
+    
+    // version and variant
+    value[6] = (value[6] & 0x0F) | 0x70; // UUID version 7
+    value[8] = (value[8] & 0x3F) | 0x80; // RFC 4122 variant
+    
+    return 0;
 }
- */
+
+char *ai_uuid_v7_stringify (uint8_t uuid[UUID_LEN], char value[UUID_STR_MAXLEN], bool dash_format) {
+    if (dash_format) {
+        snprintf(value, UUID_STR_MAXLEN, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+            uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7],
+            uuid[8], uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]
+        );
+    } else {
+        snprintf(value, UUID_STR_MAXLEN, "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
+            uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7],
+            uuid[8], uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]
+        );
+    }
+    
+    return (char *)value;
+}
+
+char *ai_uuid_v7_string (char value[UUID_STR_MAXLEN], bool dash_format) {
+    uint8_t uuid[UUID_LEN];
+    if (ai_uuid_v7_generate(uuid) != 0) return NULL;
+    return ai_uuid_v7_stringify(uuid, value, dash_format);
+}
 
 // MARK: -
 

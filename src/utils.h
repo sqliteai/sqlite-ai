@@ -17,6 +17,8 @@
 #include "sqlite3.h"
 #endif
 
+#define UUID_STR_MAXLEN                         37
+
 typedef struct {
     char                *data;                  // raw buffer
     uint32_t            capacity;               // size of the buffer
@@ -24,21 +26,19 @@ typedef struct {
 } buffer_t;
 
 typedef bool (*keyvalue_callback)(sqlite3_context *context, void *xdata, const char *key, int key_len, const char *value, int value_len);
-
-//bool sqlite_utils_init (void);
-bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, int argc, sqlite3_value **argv, int ntypes, int *types, bool check_model);
-int sqlite_db_write (sqlite3_context *context, sqlite3 *db, const char *sql, const char **values, int types[], int lens[], int count);
-bool sqlite_context_result_error (sqlite3_context *context, int rc, const char *format, ...);
-int sqlite_vtab_set_error (sqlite3_vtab *vtab, const char *format, ...);
 bool parse_keyvalue_string (sqlite3_context *context, const char *str, keyvalue_callback callback, void *xdata);
+
+bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, int argc, sqlite3_value **argv, int ntypes, int *types, bool check_model);
+int  sqlite_db_write (sqlite3_context *context, sqlite3 *db, const char *sql, const char **values, int types[], int lens[], int count);
+bool sqlite_context_result_error (sqlite3_context *context, int rc, const char *format, ...);
+int  sqlite_vtab_set_error (sqlite3_vtab *vtab, const char *format, ...);
 char *sqlite_strdup (const char *str);
 
 bool buffer_create (buffer_t *b, uint32_t size);
-bool buffer_append (buffer_t *b, const char *data, uint32_t len);
+bool buffer_append (buffer_t *b, const char *data, uint32_t len, bool zero_terminate);
+bool buffer_resize (buffer_t *b, uint32_t new_capacity);
 void buffer_destroy (buffer_t *b);
 
-//bool sqlite_set_ptr (sqlite3 *db, void *ptr);
-//void *sqlite_get_ptr (sqlite3 *db);
-//void sqlite_clear_ptr (sqlite3 *db);
+char *ai_uuid_v7_string (char value[UUID_STR_MAXLEN], bool dash_format);
 
 #endif

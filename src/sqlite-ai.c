@@ -39,6 +39,7 @@ SQLITE_EXTENSION_INIT1
 #define MIN_ALLOC_TOKEN                         512
 #define MAX_PATH                                4096
 #define MAX_TOKEN_TEXT_LEN                      128     // according to ChatGPT 32 would be safe for all common tokenizers
+#define MIN_ALLOC_MESSAGES                      256
 
 #define LOG_TABLE_DECLARATION                   "CREATE TEMP TABLE ai_log (id INTEGER PRIMARY KEY, stamp DATETIME DEFAULT CURRENT_TIMESTAMP, type TEXT, message TEXT);"
 #define LOG_TABLE_INSERT_STMT                   "INSERT INTO ai_log (type, message) VALUES (?, ?);"
@@ -172,6 +173,9 @@ typedef struct {
     int                         prev_len;
 } ai_cursor;
 
+const char *ROLE_USER       = "user";
+const char *ROLE_ASSISTANT  = "assistant";
+
 // MARK: -
 
 static void ai_options_init (ai_options *options) {
@@ -256,6 +260,7 @@ void ai_sqlite_context_free (void *ctx) {
     if (!ctx) return;
     
     ai_context *ai = (ai_context *)ctx;
+    ai->db = NULL;
     if (ai->model) llama_model_free(ai->model);
     if (ai->ctx) llama_free(ai->ctx);
     if (ai->token_buffer) sqlite3_free(ai->token_buffer);
@@ -263,6 +268,7 @@ void ai_sqlite_context_free (void *ctx) {
 
 void ai_logger (enum ggml_log_level level, const char *text, void *user_data) {
     ai_context *ai = (ai_context *)user_data;
+    if (ai->db == NULL) return;
     if ((level == GGML_LOG_LEVEL_INFO) && (ai->options.log_info == false)) return;
     
     const char *type = NULL;
@@ -274,6 +280,8 @@ void ai_logger (enum ggml_log_level level, const char *text, void *user_data) {
         case GGML_LOG_LEVEL_ERROR: type = "ERROR"; break;
         case GGML_LOG_LEVEL_CONT: type = NULL; break;
     }
+    
+    printf("%s %s\n", type, text);
     
     const char *values[] = {type, text};
     int types[] = {SQLITE_TEXT, SQLITE_TEXT};
@@ -350,9 +358,9 @@ static bool ai_common_args_check (sqlite3_context *context, const char *function
 
 // MARK: -
 
-bool ai_messages_append (ai_messages *list, const char *role, const char *content) {
+bool ai_messages_append (ai_messages *list, const char *role, const char *content, bool duplicate_content) {
     if (list->count >= list->capacity) {
-        size_t new_cap = list->capacity ? list->capacity * 2 : 4;
+        size_t new_cap = list->capacity ? list->capacity * 2 : MIN_ALLOC_MESSAGES;
         llama_chat_message *new_items = sqlite3_realloc64(list->items, new_cap * sizeof(llama_chat_message));
         if (!new_items) return false;
         
@@ -360,18 +368,18 @@ bool ai_messages_append (ai_messages *list, const char *role, const char *conten
         list->capacity = new_cap;
     }
 
-    list->items[list->count].role = sqlite_strdup(role);
-    list->items[list->count].content = sqlite_strdup(content);
+    list->items[list->count].role = role;   // ROLE is static memory
+    list->items[list->count].content = (duplicate_content) ? sqlite_strdup(content) : content;
     list->count += 1;
     return true;
 }
 
 void ai_messages_free (ai_messages *list) {
     for (size_t i = 0; i < list->count; ++i) {
-        sqlite3_free((char *)list->items[i].role);
         sqlite3_free((char *)list->items[i].content);
     }
     sqlite3_free(list->items);
+    
     list->items = NULL;
     list->count = 0;
     list->capacity = 0;
@@ -609,7 +617,7 @@ static void ai_text_run (sqlite3_context *context, const char *text, int32_t tex
         return;
     }
     
-    int n_actual = llama_tokenize(vocab, text, text_len, tokens, n_prompt, true, true); // TODO: false, false?
+    int n_actual = llama_tokenize(vocab, text, text_len, tokens, n_prompt, true, true);
     if (n_actual != n_prompt) {
         sqlite3_free(tokens);
         sqlite_context_result_error(context, SQLITE_ERROR, "Tokenization size mismatch: got %d tokens, expected %d", n_actual, n_prompt);
@@ -677,7 +685,7 @@ static void ai_text_run (sqlite3_context *context, const char *text, int32_t tex
             goto cleanup;
         }
         
-        if (buffer_append(&buffer, buf, n) == false) {
+        if (buffer_append(&buffer, buf, n, true) == false) {
             sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate and append buffer (%d bytes)", buffer.capacity + n);
             goto cleanup;
         }
@@ -722,7 +730,7 @@ static void ai_text_generate (sqlite3_context *context, int argc, sqlite3_value 
  */
 
 static int vt_chat_connect (sqlite3 *db, void *pAux, int argc, const char *const *argv, sqlite3_vtab **ppVtab, char **pzErr) {
-    int rc = sqlite3_declare_vtab(db, "CREATE TABLE x(reply);");
+    int rc = sqlite3_declare_vtab(db, "CREATE TABLE x(reply, dummy hidden);");
     if (rc != SQLITE_OK) return rc;
     
     ai_vtab *vtab = (ai_vtab *)sqlite3_malloc(sizeof(ai_vtab));
@@ -742,10 +750,20 @@ static int vt_chat_disconnect (sqlite3_vtab *pVtab) {
 }
 
 static int vt_chat_best_index (sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo) {
-    pIdxInfo->estimatedCost = (double)1;
-    pIdxInfo->estimatedRows = 100;
-    pIdxInfo->orderByConsumed = 1;
     pIdxInfo->idxNum = 1;
+    pIdxInfo->orderByConsumed = 1;
+    pIdxInfo->estimatedCost = (double)1;
+    
+    for (int i = 0; i < pIdxInfo->nConstraint; i++) {
+        if (pIdxInfo->aConstraint[i].usable && pIdxInfo->aConstraint[i].op == SQLITE_INDEX_CONSTRAINT_EQ) {
+            // tell SQLite we'll use this argument
+            pIdxInfo->aConstraintUsage[i].argvIndex = 1;
+            pIdxInfo->aConstraintUsage[i].omit = 1;
+            pIdxInfo->idxNum = 1;
+            break;
+        }
+    }
+    
     return SQLITE_OK;
 }
 
@@ -755,6 +773,7 @@ static int vt_chat_cursor_open (sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCur
     
     memset(c, 0, sizeof(ai_cursor));
     ai_vtab *vtab = (ai_vtab *)pVtab;
+    c->vtab = vtab;
     c->ai = vtab->ai;
     
     ai_context *ai = c->ai;
@@ -765,24 +784,21 @@ static int vt_chat_cursor_open (sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCur
     return SQLITE_OK;
 }
 
-static int vt_chat_cursor_close (sqlite3_vtab_cursor *cur){
+static int vt_chat_cursor_close (sqlite3_vtab_cursor *cur) {
     ai_cursor *c = (ai_cursor *)cur;
     if (c->formatted.data) sqlite3_free(c->formatted.data);
-    
     if (c->messages.items) ai_messages_free(&c->messages);
-    if (c->formatted.data) sqlite3_free(c->formatted.data);
-    
     sqlite3_free(c);
     return SQLITE_OK;
 }
 
-static int vt_chat_cursor_next (sqlite3_vtab_cursor *cur){
+static int vt_chat_cursor_next (sqlite3_vtab_cursor *cur) {
     ai_cursor *c = (ai_cursor *)cur;
     c->rowid++;
     return SQLITE_OK;
 }
 
-static int vt_chat_cursor_eof (sqlite3_vtab_cursor *cur){
+static int vt_chat_cursor_eof (sqlite3_vtab_cursor *cur) {
     ai_cursor *c = (ai_cursor *)cur;
     return (int)c->is_eog;
 }
@@ -802,8 +818,102 @@ static int vt_chat_cursor_rowid (sqlite3_vtab_cursor *cur, sqlite_int64 *pRowid)
     return SQLITE_OK;
 }
 
-static char *vt_chat_cursor_generate (sqlite3_vtab_cursor *cur, const char *text) {
-    return NULL;
+static char *vt_chat_cursor_generate (sqlite3_vtab_cursor *cur, const char *prompt) {
+    ai_cursor  *c = (ai_cursor *)cur;
+    ai_context *ai = c->ai;
+    ai_vtab *vtab = c->vtab;
+    
+    struct llama_context *ctx = ai->ctx;
+    struct llama_sampler *sampler = ai->sampler;
+    const struct llama_vocab *vocab = llama_model_get_vocab(ai->model);
+    
+    // check if first execution
+    bool is_first = (llama_memory_seq_pos_max(llama_get_memory(ctx), 0) == -1);
+    
+    // count how many tokens prompt generates
+    int32_t prompt_len = (int32_t)strlen(prompt);
+    int32_t n_prompt_tokens = -llama_tokenize(vocab, prompt, prompt_len, NULL, 0, is_first, true);
+    if (n_prompt_tokens <= 0) {
+        sqlite_vtab_set_error(&vtab->base, "Failed to determine prompt token count");
+        return NULL;
+    }
+    
+    // allocate tokens
+    llama_token *prompt_tokens = sqlite3_malloc(sizeof(llama_token) * n_prompt_tokens);
+    if (!prompt_tokens) {
+        sqlite_vtab_set_error(&vtab->base, "Failed to allocate prompt token buffer");
+        return NULL;
+    }
+    
+    // tokenize prompt
+    if (llama_tokenize(vocab, prompt, prompt_len, prompt_tokens, n_prompt_tokens, is_first, true) < 0) {
+        sqlite_vtab_set_error(&vtab->base, "Failed to tokenize the prompt");
+        sqlite3_free(prompt_tokens);
+        return NULL;
+    }
+    
+    // allocate initial response buffer
+    buffer_t response;
+    if (buffer_create(&response, 0) == false) {
+        sqlite_vtab_set_error(&vtab->base, "Unable to allocate response buffer");
+        sqlite3_free(prompt_tokens);
+        return NULL;
+    }
+    
+    // create initial batch
+    llama_token new_token_id;
+    llama_batch batch = llama_batch_get_one(prompt_tokens, n_prompt_tokens);
+    //sqlite3_free(prompt_tokens);
+    
+    // TODO: must be in streaming here
+    while (1) {
+        // check context space
+        int n_ctx = llama_n_ctx(ctx);
+        int n_ctx_used = llama_memory_seq_pos_max(llama_get_memory(ctx), 0);
+        if (n_ctx_used + batch.n_tokens > n_ctx) {
+            sqlite_vtab_set_error(&vtab->base, "Context size exceeded");
+            buffer_destroy(&response);
+            break;
+        }
+        
+        if (llama_decode(ctx, batch)) {
+            sqlite_vtab_set_error(&vtab->base, "Failed to decode prompt batch");
+            buffer_destroy(&response);
+            break;
+        }
+        
+        // sample next token
+        new_token_id = llama_sampler_sample(sampler, ctx, -1);
+        
+        if (llama_vocab_is_eog(vocab, new_token_id)) {
+            break;
+        }
+        
+        // convert token to string
+        char buf[MAX_TOKEN_TEXT_LEN];
+        int n = llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
+        if (n < 0) {
+            sqlite_vtab_set_error(&vtab->base, "Failed to convert token to string");
+            buffer_destroy(&response);
+            break;
+        }
+        
+        // append converted token to response buffer
+        if (buffer_append(&response, buf, n, true) == false) {
+            sqlite_vtab_set_error(&vtab->base, "Failed to grow response buffer");
+            buffer_destroy(&response);
+            break;
+        }
+        
+        // print to terminal
+        fwrite(buf, 1, n, stdout);
+        fflush(stdout);
+        
+        // prepare next batch
+        batch = llama_batch_get_one(&new_token_id, 1);
+    }
+    
+    return response.data;
 }
 
 static int vt_chat_cursor_filter (sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, int argc, sqlite3_value **argv) {
@@ -819,17 +929,22 @@ static int vt_chat_cursor_filter (sqlite3_vtab_cursor *cur, int idxNum, const ch
         return sqlite_vtab_set_error(&vtab->base, "ai_chat argument must be of type TEXT");
     }
     
-    const char *input = (const char *)sqlite3_value_text(argv[0]);
+    const char *user_input = (const char *)sqlite3_value_text(argv[0]);
     const char *template = llama_model_chat_template(ai->model, NULL);
     ai_messages *messages = &c->messages;
     buffer_t *formatted = &c->formatted;
     
-    if (!ai_messages_append(messages, "user", input)) {
+    if (!ai_messages_append(messages, ROLE_USER, user_input, true)) {
         return sqlite_vtab_set_error(&vtab->base, "failed to append message");
     }
     
-    int new_len = llama_chat_apply_template(template, messages->items, messages->count, true, formatted->data, formatted->capacity);
-    
+    // transform a list of messages (the context) into
+    // <|user|>What is AI?<|end|><|assistant|>AI stands for Artificial Intelligence...<|end|><|user|>Can you give an example?<|end|><|assistant|>...
+    int32_t new_len = llama_chat_apply_template(template, messages->items, messages->count, true, formatted->data, formatted->capacity);
+    if (new_len > formatted->capacity) {
+        if (buffer_resize(formatted, new_len * 2) == false) return false;
+        new_len = llama_chat_apply_template(template, messages->items, messages->count, true, formatted->data, formatted->capacity);
+    }
     if (new_len < 0) {
         return sqlite_vtab_set_error(&vtab->base, "failed to apply chat template");
     }
@@ -841,18 +956,18 @@ static int vt_chat_cursor_filter (sqlite3_vtab_cursor *cur, int idxNum, const ch
         return sqlite_vtab_set_error(&vtab->base, "failed to allocate prompt buffer");
         
     }
-    memcpy(prompt, formatted + c->prev_len, prompt_len);
+    memcpy(prompt, formatted->data + c->prev_len, prompt_len);
     prompt[prompt_len] = 0;
     
     char *response = vt_chat_cursor_generate(cur, prompt);
     sqlite3_free(prompt);
+    if (response == NULL) return SQLITE_ERROR;
     
-    if (!ai_messages_append(messages, "assistant", response)) {
+    if (!ai_messages_append(messages, ROLE_ASSISTANT, response, false)) {
         sqlite_vtab_set_error(&vtab->base, "failed to append response");
         sqlite3_free(response);
         return SQLITE_ERROR;
     }
-    sqlite3_free(response);
     
     c->prev_len = llama_chat_apply_template(template, messages->items, messages->count, false, NULL, 0);
     if (c->prev_len < 0) return sqlite_vtab_set_error(&vtab->base, "failed to apply chat template\n");
@@ -887,6 +1002,29 @@ static sqlite3_module vt_chat = {
   /* xShadowName */ 0,
   /* xIntegrity  */ 0
 };
+
+static void ai_chat_create (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    
+}
+
+static void ai_chat_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+}
+
+static void ai_chat_reset (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+}
+
+static void ai_chat_save (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // title, metadata
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+}
+
+static void ai_chat_restore (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // UUID
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+}
 
 // MARK: -
 
@@ -1294,8 +1432,23 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     rc = sqlite3_create_function(db, "ai_text_generate", 2, SQLITE_UTF8, ctx, ai_text_generate, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
-    //rc = sqlite3_create_module(db, "ai_chat", &vt_chat, ctx);
-    //if (rc != SQLITE_OK) goto cleanup;
+    rc = sqlite3_create_module(db, "ai_chat", &vt_chat, ctx);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "ai_chat_create", 0, SQLITE_UTF8, ctx, ai_chat_create, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "ai_chat_free", 0, SQLITE_UTF8, ctx, ai_chat_free, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "ai_chat_reset", 0, SQLITE_UTF8, ctx, ai_chat_reset, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "ai_chat_save", 2, SQLITE_UTF8, ctx, ai_chat_save, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "ai_chat_restore", 1, SQLITE_UTF8, ctx, ai_chat_restore, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
     
 cleanup:
     return rc;
