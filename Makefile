@@ -29,6 +29,7 @@ CC = gcc
 CXX = g++
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include
 LDFLAGS = -L./$(BUILD_DIR)/lib/common -L./$(BUILD_DIR)/lib/ggml/src -L./$(BUILD_DIR)/lib/ggml/src/ggml-blas -L./$(BUILD_DIR)/lib/src -lcommon -lggml -lggml-blas -lggml-base -lggml-cpu -lllama
+LLAMA_OPTIONS = -DLLAMA_CURL=OFF
 
 # Directories
 SRC_DIR = src
@@ -58,7 +59,7 @@ else ifeq ($(PLATFORM),macos)
     LIBS += $(BUILD_DIR)/lib/ggml/src/ggml-metal/libggml-metal.a
     LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_DIR)/lib/ggml/src/ggml-metal -lggml-metal -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -dynamiclib -undefined dynamic_lookup
     CFLAGS += -arch x86_64 -arch arm64
-    LLAMA_OPTIONS = -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+    LLAMA_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 else ifeq ($(PLATFORM),android)
     # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
     ifeq ($(filter %,$(ARCH)),)
@@ -85,11 +86,13 @@ else ifeq ($(PLATFORM),ios)
     SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=11.0
     LDFLAGS += -dynamiclib $(SDK)
     CFLAGS += -arch arm64 $(SDK)
+    LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS
 else ifeq ($(PLATFORM),isim)
     TARGET := $(DIST_DIR)/ai.dylib
     SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=11.0
     LDFLAGS += -arch x86_64 -arch arm64 -dynamiclib $(SDK)
     CFLAGS += -arch x86_64 -arch arm64 $(SDK)
+    LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 else # linux
     TARGET := $(DIST_DIR)/ai.so
     LDFLAGS += -shared
@@ -127,9 +130,8 @@ test: $(TARGET)
 
 # Build all libraries at once using one CMake call
 build/libs.stamp:
-	cd $(BUILD_DIR) && \
-	cmake -B lib -DBUILD_SHARED_LIBS=OFF $(LLAMA_OPTIONS) ../$(LLAMA_DIR) && \
-	cmake --build lib --config Release -- -j$(CPUS)
+	cmake -B $(BUILD_DIR)/lib -DBUILD_SHARED_LIBS=OFF $(LLAMA_OPTIONS) $(LLAMA_DIR)
+	cmake --build $(BUILD_DIR)/lib --config Release -- -j$(CPUS)
 	touch $@
 
 $(LIBS): build/libs.stamp
