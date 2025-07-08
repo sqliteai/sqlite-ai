@@ -1,2 +1,11 @@
 .DS_Store
 /modules/libs
+*.xcworkspacedata
+*.xcuserstate
+*.xcbkptlist
+*.plist
+/build
+/dist
+*.sqlite
+*.a
+.vscode
