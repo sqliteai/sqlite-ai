@@ -135,15 +135,18 @@ $(BUILD_DIR)/%.o: %.c
 test: $(TARGET)
 	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./$<" "SELECT ai_version();"
 
-# Build all libraries at once using one CMake call
+# Build submodules
+ifneq ($(PLATFORM),windows)
+BUILD_OPTIONS = -- -j$(CPUS)
+endif
 build/llama.cpp.stamp:
 	cmake -B $(BUILD_LLAMA) -DBUILD_SHARED_LIBS=OFF $(LLAMA_OPTIONS) $(LLAMA_DIR)
-	cmake --build $(BUILD_LLAMA) --config Release -- -j$(CPUS)
+	cmake --build $(BUILD_LLAMA) --config Release $(BUILD_OPTIONS)
 	touch $@
 
 build/whisper.cpp.stamp:
 	cmake -B $(BUILD_WHISPER) -DBUILD_SHARED_LIBS=OFF $(WHISPER_OPTIONS) $(WHISPER_DIR)
-	cmake --build $(BUILD_WHISPER) --config Release -- -j$(CPUS)
+	cmake --build $(BUILD_WHISPER) --config Release $(BUILD_OPTIONS)
 	touch $@
 
 $(LLAMA_LIBS): build/llama.cpp.stamp
