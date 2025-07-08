@@ -127,11 +127,10 @@ test: $(TARGET)
 
 # Build all libraries at once using one CMake call
 build/libs.stamp:
-	@echo "Building llama.cpp libraries with jobs: $(JOBS)..."
 	#-DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	cd $(BUILD_DIR) && \
 	cmake -B lib -DBUILD_SHARED_LIBS=OFF ../$(LLAMA_DIR) && \
-	cmake --build lib --config Release -- -j$(JOBS)
+	cmake --build lib --config Release -- -j$(CPUS)
 	touch $@
 
 $(LIBS): build/libs.stamp
