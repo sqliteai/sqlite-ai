@@ -49,6 +49,8 @@ jobs:
     steps:
 
       - uses: actions/checkout@v4.2.2
+        with:
+          submodules: true
 
       - name: build sqlite-ai
         run: make extension ${{ matrix.make && matrix.make || ''}}
