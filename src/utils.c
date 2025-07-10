@@ -61,6 +61,11 @@ bool buffer_resize (buffer_t *b, uint32_t new_capacity) {
     return true;
 }
 
+void buffer_reset (buffer_t *b) {
+    if (b->data) b->data[0] = 0;
+    b->length = 0;
+}
+
 bool buffer_append (buffer_t *b, const char *data, uint32_t len, bool zero_terminate) {
     if (b->length + len + 1> b->capacity) {
         uint32_t new_capacity = b->length + len + 1 + MIN_BUFFER_SIZE;
@@ -221,7 +226,7 @@ bool sqlite_context_result_error (sqlite3_context *context, int rc, const char *
     return false;
 }
 
-void *sqlite_common_set_error (sqlite3_context *context, sqlite3_vtab *vtab, int rc, const char *format, ...) {
+void sqlite_common_set_error (sqlite3_context *context, sqlite3_vtab *vtab, int rc, const char *format, ...) {
     char buffer[4096];
     char *err = NULL;
     
@@ -237,8 +242,6 @@ void *sqlite_common_set_error (sqlite3_context *context, sqlite3_vtab *vtab, int
         sqlite3_result_error(context, buffer, -1);
         sqlite3_result_error_code(context, rc);
     }
-    
-    return NULL;
 }
 
 bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, int argc, sqlite3_value **argv, int ntypes, int *types, bool check_model) {
@@ -257,7 +260,7 @@ bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, in
     
     if (check_model) {
         if (ai_model_check(context) == false) {
-            sqlite_context_result_error(context, SQLITE_MISUSE, "No model is currently set. Please call ai_model_set() before using this function.");
+            sqlite_context_result_error(context, SQLITE_MISUSE, "No model is currently set. Please call ai_model_load() before using this function.");
             return false;
         }
     }
@@ -313,6 +316,10 @@ cleanup:
     }
     if (pstmt) sqlite3_finalize(pstmt);
     return rc;
+}
+
+int sqlite_db_write_simple (sqlite3_context *context, sqlite3 *db, const char *sql) {
+    return sqlite_db_write(context, db, sql, NULL, NULL, NULL, 0);
 }
 
 char *sqlite_strdup (const char *str) {
@@ -389,7 +396,7 @@ char *ai_uuid_v7_string (char value[UUID_STR_MAXLEN], bool dash_format) {
 
 // MARK: -
 
-bool parse_keyvalue_string (sqlite3_context *context, const char *str, keyvalue_callback callback, void *xdata) {
+bool parse_keyvalue_string (const char *str, keyvalue_callback callback, void *xdata) {
     if (!str) return true;
     
     const char *p = str;
@@ -418,7 +425,7 @@ bool parse_keyvalue_string (sqlite3_context *context, const char *str, keyvalue_
         int val_len = (int)(p - val_start);
         TRIM_TRAILING(val_start, val_len);
         
-        bool rc = callback(context, xdata, key_start, key_len, val_start, val_len);
+        bool rc = callback(xdata, key_start, key_len, val_start, val_len);
         if (!rc) return rc;
         
         if (*p == ',') p++;

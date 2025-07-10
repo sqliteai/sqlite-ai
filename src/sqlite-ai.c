@@ -36,7 +36,9 @@ SQLITE_EXTENSION_INIT1
 #endif
 
 #define NPREDICT_DEFAULT_VALUE                  128
-#define MIN_ALLOC_TOKEN                         512
+#define MIN_ALLOC_TOKEN                         4096
+#define MIN_ALLOC_PROMPT                        4096
+#define MIN_ALLOC_RESPONSE                      4096
 #define MAX_PATH                                4096
 #define MAX_TOKEN_TEXT_LEN                      128     // according to ChatGPT 32 would be safe for all common tokenizers
 #define MIN_ALLOC_MESSAGES                      256
@@ -93,42 +95,6 @@ typedef struct {
 
     // ** SAMPLER **
     int                         n_predict;          // number of tokens to predict
-    // EXPOSE FUNCTIONS INSTEAD OF SETTINGS
-    // ai_sampler_create
-    // ai_sampler_free
-    /*
-    int32_t                     top_k;              // Top-K sampling described in academic paper "The Curious Case of Neural Text Degeneration" https://arxiv.org/abs/1904.09751
-    float                       top_p;              // Nucleus sampling described in academic paper "The Curious Case of Neural Text Degeneration" https://arxiv.org/abs/1904.09751
-    size_t                      top_p_min_keep;
-    float                       min_p;              // Minimum P sampling as described in https://github.com/ggml-org/llama.cpp/pull/3841
-    size_t                      min_p_min_keep;
-    float                       typical;            // Locally Typical Sampling implementation described in the paper https://arxiv.org/abs/2202.00666
-    size_t                      typical_min_keep;
-    float                       temp;
-    float                       temp_ext;           // Dynamic temperature implementation (a.k.a. entropy) described in the paper https://arxiv.org/abs/2309.02772
-    float                       temp_ext_delta;
-    float                       temp_ext_exponent;
-    float                       xtc;                // XTC sampler as described in https://github.com/oobabooga/text-generation-webui/pull/6335
-    float                       xtc_t;
-    size_t                      xtc_min_keep;
-    uint32_t                    xtc_seed;
-    float                       top_n_sigma;        // Top n sigma sampling as described in academic paper "Top-nσ: Not All Logits Are You Need" https://arxiv.org/pdf/2411.07641
-    
-    int32_t                     mirostat_n_vocab;   // Mirostat 1.0 algorithm described in the paper https://arxiv.org/abs/2007.14966. Uses tokens instead of words.
-    uint32_t                    mirostat_seed;
-    float                       mirostat_tau;
-    float                       mirostat_eta;
-    int32_t                     mirostat_m;
-    
-    uint32_t                    mirostatv2_seed;    // Mirostat 2.0 algorithm described in the paper https://arxiv.org/abs/2007.14966. Uses tokens instead of words.
-    float                       mirostatv2_tau;
-    float                       mirostatv2_eta;
-    
-    int32_t                     penalty_last_n;     // last n tokens to penalize (0 = disable penalty, -1 = context size)
-    float                       penalty_repeat;     // 1.0 = disabled
-    float                       penalty_freq;       // 0.0 = disabled
-    float                       penalty_present;    // 0.0 = disabled
-     */
     
     // ** EMBEDDING **
     bool                        generate_embedding; // if true, extract embeddings (together with logits)
@@ -141,14 +107,43 @@ typedef struct {
 } ai_options;
 
 typedef struct {
+    llama_chat_message *items;
+    size_t count;
+    size_t capacity;
+} ai_messages;
+
+typedef struct {
+    // sqlite
     sqlite3                     *db;
+    sqlite3_vtab                *vtab;
+    sqlite3_context             *context;
+    
+    // llama
     struct llama_model          *model;
     struct llama_context        *ctx;
     struct llama_sampler        *sampler;
-    
-    llama_token                 *token_buffer;
-    int32_t                     token_buffer_size;
     ai_options                  options;
+    
+    // chat
+    struct {
+        char                    uuid[UUID_STR_MAXLEN];
+        const char              *template;
+        const struct llama_vocab*vocab;
+        
+        ai_messages             messages;
+        buffer_t                formatted;
+        buffer_t                response;
+        char                    *prompt;
+        int32_t                 prev_len;
+        llama_token             *tokens;
+        int32_t                 ntokens;
+        llama_batch             batch;
+        
+        llama_token             token_id;
+        char                    token_text[MAX_TOKEN_TEXT_LEN];
+        int32_t                 token_len;
+        int32_t                 token_count;
+    } chat;
 } ai_context;
 
 typedef struct {
@@ -157,20 +152,12 @@ typedef struct {
 } ai_vtab;
 
 typedef struct {
-    llama_chat_message *items;
-    size_t count;
-    size_t capacity;
-} ai_messages;
-
-typedef struct {
     sqlite3_vtab_cursor         base;               // Base class - must be first
     ai_vtab                     *vtab;
     ai_context                  *ai;
-    ai_messages                 messages;
-    buffer_t                    formatted;
+    
     bool                        is_eog;
     sqlite_int64                rowid;
-    int                         prev_len;
 } ai_cursor;
 
 const char *ROLE_USER       = "user";
@@ -186,12 +173,12 @@ static void ai_options_init (ai_options *options) {
     options->log_info = false;  // disable INFO messages logging
 }
 
-static bool ai_options_callback (sqlite3_context *context, void *xdata, const char *key, int key_len, const char *value, int value_len) {
+static bool ai_options_callback (void *xdata, const char *key, int key_len, const char *value, int value_len) {
     ai_options *options = (ai_options *)xdata;
     
-    // sanity check
-    if (!key || key_len == 0) return false;
-    if (!value || value_len == 0) return false;
+    // sanity check (ignore malformed key/value)
+    if (!key || key_len == 0) return true;
+    if (!value || value_len == 0) return true;
     
     // debug
     // printf("KEY: \"%.*s\", VALUE: \"%.*s\"\n", key_len, key, value_len, value);
@@ -247,7 +234,7 @@ static bool ai_options_callback (sqlite3_context *context, void *xdata, const ch
     return true;
 }
 
-void *ai_sqlite_context_create (sqlite3 *db) {
+void *ai_create (sqlite3 *db) {
     ai_context *ai = (ai_context *)sqlite3_malloc(sizeof(ai_context));
     if (ai) {
         ai_options_init(&ai->options);
@@ -256,15 +243,23 @@ void *ai_sqlite_context_create (sqlite3 *db) {
     return ai;
 }
 
-void ai_sqlite_context_free (void *ctx) {
+static void ai_cleanup (void *ctx) {
     if (!ctx) return;
-    
     ai_context *ai = (ai_context *)ctx;
+    
+    // disable logger first
     ai->db = NULL;
+    
     if (ai->model) llama_model_free(ai->model);
     if (ai->ctx) llama_free(ai->ctx);
-    if (ai->token_buffer) sqlite3_free(ai->token_buffer);
+    if (ai->sampler) llama_sampler_free(ai->sampler);
+    ai_options_init(&ai->options);
+    
+    ai->model = NULL;
+    ai->ctx = NULL;
+    ai->sampler = NULL;
 }
+
 
 void ai_logger (enum ggml_log_level level, const char *text, void *user_data) {
     ai_context *ai = (ai_context *)user_data;
@@ -281,7 +276,8 @@ void ai_logger (enum ggml_log_level level, const char *text, void *user_data) {
         case GGML_LOG_LEVEL_CONT: type = NULL; break;
     }
     
-    printf("%s %s\n", type, text);
+    // DEBUG
+    // printf("%s %s\n", type, text);
     
     const char *values[] = {type, text};
     int types[] = {SQLITE_TEXT, SQLITE_TEXT};
@@ -314,8 +310,7 @@ bool ai_model_check (sqlite3_context *context) {
     return (ai->model != NULL);
 }
 
-struct llama_context *ai_context_check (sqlite3_context *context) {
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+struct llama_context *ai_context_check (ai_context *ai) {
     if (ai->ctx) return ai->ctx;
     
     struct llama_context_params ctx_params = llama_context_default_params();
@@ -323,21 +318,20 @@ struct llama_context *ai_context_check (sqlite3_context *context) {
     
     struct llama_context *ctx = llama_init_from_model(ai->model, ctx_params);
     if (!ctx) {
-        sqlite_context_result_error(context, SQLITE_ERROR, "Unable to create context from model");
+        sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "Unable to create context from model");
         return NULL;
     }
     
     return ctx;
 }
 
-struct llama_sampler *ai_sampler_check (sqlite3_context *context) {
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+struct llama_sampler *ai_sampler_check (ai_context *ai) {
     if (ai->sampler) return ai->sampler;
     
     struct llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
     struct llama_sampler *sampler = llama_sampler_chain_init(sampler_params);
     if (!sampler) {
-        sqlite_context_result_error(context, SQLITE_ERROR, "Unable to create sampler");
+        sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "Unable to create sampler");
         return NULL;
     }
     ai->sampler = sampler;
@@ -353,12 +347,13 @@ static bool ai_common_args_check (sqlite3_context *context, const char *function
         int types[] = {SQLITE_TEXT, SQLITE_TEXT};
         return sqlite_sanity_function(context, function_name, argc, argv, 2, types, check_model);
     }
+    
     return sqlite_context_result_error(context, SQLITE_ERROR, "Function '%s' expects 1 or 2 arguments, but %d were provided.", function_name, argc);
 }
 
-// MARK: -
+// MARK: - Chat Messages -
 
-bool ai_messages_append (ai_messages *list, const char *role, const char *content, bool duplicate_content) {
+bool ai_messages_append (ai_messages *list, const char *role, const char *content, bool duplicate_role, bool duplicate_content) {
     if (list->count >= list->capacity) {
         size_t new_cap = list->capacity ? list->capacity * 2 : MIN_ALLOC_MESSAGES;
         llama_chat_message *new_items = sqlite3_realloc64(list->items, new_cap * sizeof(llama_chat_message));
@@ -368,14 +363,17 @@ bool ai_messages_append (ai_messages *list, const char *role, const char *conten
         list->capacity = new_cap;
     }
 
-    list->items[list->count].role = role;   // ROLE is static memory
+    list->items[list->count].role = (duplicate_role) ? sqlite_strdup(role) : role;
     list->items[list->count].content = (duplicate_content) ? sqlite_strdup(content) : content;
+    list->items[list->count].role_tofree = duplicate_role;
     list->count += 1;
     return true;
 }
 
 void ai_messages_free (ai_messages *list) {
     for (size_t i = 0; i < list->count; ++i) {
+        // content is always to free
+        if (list->items[list->count].role_tofree) sqlite3_free((char *)list->items[i].role);
         sqlite3_free((char *)list->items[i].content);
     }
     sqlite3_free(list->items);
@@ -383,13 +381,6 @@ void ai_messages_free (ai_messages *list) {
     list->items = NULL;
     list->count = 0;
     list->capacity = 0;
-}
-
-// MARK: -
-
-static const char *db_check_model (sqlite3 *db, const char *name, char *path, size_t path_len) {
-    // TODO: load path from name inside the ai_models table
-    return NULL;
 }
 
 // MARK: - Text Embedding -
@@ -452,7 +443,7 @@ static void ai_text_embed_run (sqlite3_context *context, const char *text, int32
     // sanity check context
     if (!ai->ctx) {
         ai->options.generate_embedding = true;
-        ai->ctx = ai_context_check(context);
+        ai->ctx = ai_context_check(ai);
     }
     if (!ai->ctx) return;
     
@@ -501,23 +492,18 @@ static void ai_text_embed_run (sqlite3_context *context, const char *text, int32
         return;
     }
     
-    // check if memory allocation is needed
-    if (n_tokens > ai->token_buffer_size) {
-        int32_t n_count = (n_tokens > MIN_ALLOC_TOKEN) ? n_tokens : MIN_ALLOC_TOKEN;
-        if (ai->token_buffer) sqlite3_free(ai->token_buffer);
-        ai->token_buffer = sqlite3_malloc64(n_count * sizeof(llama_token));
-        if (!ai->token_buffer) {
-            sqlite3_free(embedding);
-            sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate %d tokens", n_count);
-            return;
-        }
-        ai->token_buffer_size = n_count;
+    // allocate memory for tokens
+    llama_token *tokens = sqlite3_malloc64(n_tokens * sizeof(llama_token));
+    if (!tokens) {
+        sqlite3_free(embedding);
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate tokens memory of size %lld", (long long)(n_tokens * sizeof(llama_token)));
+        return;
     }
-    llama_token *tokens = ai->token_buffer;
     
     // tokenize input
     int n_actual = llama_tokenize(vocab, text, text_len, tokens, n_tokens, true, true);
     if (n_actual != n_tokens) {
+        sqlite3_free(tokens);
         sqlite3_free(embedding);
         sqlite_context_result_error(context, SQLITE_ERROR, "Tokenization size mismatch: got %d tokens, expected %d", n_actual, n_tokens);
         return;
@@ -539,6 +525,7 @@ static void ai_text_embed_run (sqlite3_context *context, const char *text, int32
     llama_memory_t memory = llama_get_memory(ctx);
     int32_t rc = (memory) ? llama_decode(ctx, batch) : llama_encode(ctx, batch);
     if (rc < 0) {
+        sqlite3_free(tokens);
         sqlite3_free(embedding);
         llama_batch_free(batch);
         sqlite_context_result_error(context, SQLITE_ERROR, "Model decode failed during embedding generation");
@@ -548,6 +535,7 @@ static void ai_text_embed_run (sqlite3_context *context, const char *text, int32
     // retrieve embeddings
     const float *result = llama_get_embeddings(ctx);
     if (result == NULL) {
+        sqlite3_free(tokens);
         sqlite3_free(embedding);
         llama_batch_free(batch);
         sqlite_context_result_error(context, SQLITE_ERROR, "Failed to retrieve embedding vector from model");
@@ -574,6 +562,7 @@ static void ai_text_embed_run (sqlite3_context *context, const char *text, int32
         sqlite3_result_blob(context, embedding, sizeof(float) * dimension, sqlite3_free);
     }
     
+    sqlite3_free(tokens);
     llama_batch_free(batch);
 }
 
@@ -585,7 +574,7 @@ static void ai_text_embed (sqlite3_context *context, int argc, sqlite3_value **a
     const char *model_options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(context, model_options, ai_options_callback, &ai->options) == false) return;
+    if (parse_keyvalue_string(model_options, ai_options_callback, &ai->options) == false) return;
     
     if (!text || text_len == 0) return;
     ai_text_embed_run(context, text, text_len);
@@ -628,7 +617,7 @@ static void ai_text_run (sqlite3_context *context, const char *text, int32_t tex
     int n_predict = (ai->options.n_predict > 0) ? ai->options.n_predict : NPREDICT_DEFAULT_VALUE;
     if (!ai->ctx) {
         ai->options.context_size = n_prompt + n_predict - 1; // set both n_ctx and n_batch
-        ai->ctx = ai_context_check(context);
+        ai->ctx = ai_context_check(ai);
     }
     if (!ai->ctx) return;
     
@@ -641,7 +630,7 @@ static void ai_text_run (sqlite3_context *context, const char *text, int32_t tex
     
     // initialize the sampler
     bool sampler_already_setup = (ai->sampler != NULL);
-    struct llama_sampler *sampler = ai_sampler_check(context);
+    struct llama_sampler *sampler = ai_sampler_check(ai);
     if (!sampler) return;
     if (!sampler_already_setup) {
         // no sampler was setup, so initialize it with some default values
@@ -715,19 +704,246 @@ static void ai_text_generate (sqlite3_context *context, int argc, sqlite3_value 
     const char *options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(context, options, ai_options_callback, &ai->options) == false) return;
-    
+    if (parse_keyvalue_string(options, ai_options_callback, &ai->options) == false) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
+        return;
+    }
+        
     if (!text || text_len == 0) return;
     ai_text_run(context, text, text_len);
 }
 
-// MARK: - Chat Virtual Table -
+// MARK: - Chat -
 
-/*
-    (NO) INSERT INTO ai_chat('Hello')
-    (NO) INSERT INTO ai_chat(prompt) VALUES ('Hello')
-    ---> SELECT reply FROM ai_chat('Hello', opt);
- */
+static bool ai_chat_check_context (ai_context *ai) {
+    // check context
+    if (!ai->ctx) {
+        const char *options = "context_size=4096,n_gpu_layers=99";
+        if (parse_keyvalue_string(options, ai_options_callback, &ai->options) == false) {
+            sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
+            return false;
+        }
+        ai->ctx = ai_context_check(ai);
+        if (!ai->ctx) return false;
+    }
+    
+    // check sampler
+    if (!ai->sampler) {
+        ai_sampler_check(ai);
+        if (ai->sampler == NULL) return false;
+        llama_sampler_chain_add(ai->sampler, llama_sampler_init_min_p(0.05, 1));
+        llama_sampler_chain_add(ai->sampler, llama_sampler_init_temp(0.8));
+        llama_sampler_chain_add(ai->sampler, llama_sampler_init_dist((uint32_t)LLAMA_DEFAULT_SEED));
+    }
+    
+    // create history structs
+    ai_uuid_v7_string(ai->chat.uuid, true);
+    
+    int n_ctx = llama_n_ctx(ai->ctx);
+    buffer_create(&ai->chat.formatted, n_ctx);
+    buffer_create(&ai->chat.response, MIN_ALLOC_RESPONSE);
+    
+    // do not report an error in case of malloc failure (it will be reported later by the function or the vtab)
+    ai->chat.prompt = (char *)sqlite3_malloc(MIN_ALLOC_PROMPT);
+    ai->chat.tokens = (llama_token *)sqlite3_malloc(sizeof(llama_token) * MIN_ALLOC_TOKEN);
+    if (ai->chat.tokens) ai->chat.ntokens = MIN_ALLOC_TOKEN;
+    
+    return true;
+}
+
+static bool ai_chat_save_response (ai_context *ai, ai_messages *messages, const char *template) {
+    char *response = ai->chat.response.data;
+    if (!response) return false;
+    
+    if (!ai_messages_append(messages, ROLE_ASSISTANT, response, false, false)) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to append response");
+        return false;
+    }
+    
+    ai->chat.prev_len = llama_chat_apply_template(template, messages->items, messages->count, false, NULL, 0);
+    if (ai->chat.prev_len < 0) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to finalize chat template");
+        return false;
+    }
+    
+    return true;
+}
+
+static bool ai_chat_generate_response (ai_context *ai, ai_cursor *c, bool *is_eog) {
+    struct llama_context *ctx = ai->ctx;
+    struct llama_sampler *sampler = ai->sampler;
+    const struct llama_vocab *vocab = ai->chat.vocab;
+    llama_batch batch = ai->chat.batch;
+    char *tok = ai->chat.token_text;
+    
+    // check context space
+    uint32_t n_ctx = llama_n_ctx(ctx);
+    int32_t n_ctx_used = llama_memory_seq_pos_max(llama_get_memory(ctx), 0);
+    if (n_ctx_used + batch.n_tokens > n_ctx) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Context size exceeded (%d, %d)", n_ctx, n_ctx_used + batch.n_tokens);
+        return false;
+    }
+    
+    if (llama_decode(ctx, batch)) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to decode prompt batch");
+        return false;
+    }
+    
+    // sample next token
+    ai->chat.token_id = llama_sampler_sample(sampler, ctx, -1);
+    
+    // DEBUG
+    // printf("%d ", ai->chat.token_id);
+    
+    if (llama_vocab_is_eog(vocab, ai->chat.token_id)) {
+        if (c) c->is_eog = true;
+        if (is_eog) *is_eog = true;
+        return true;
+    }
+    
+    // convert token to string
+    int32_t n = llama_token_to_piece(vocab, ai->chat.token_id, tok, MAX_TOKEN_TEXT_LEN, 0, true);
+    if (n < 0) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to convert token to string");
+        return false;
+    }
+    ai->chat.token_len = n;
+    
+    // append converted token to response buffer
+    if (buffer_append(&ai->chat.response, tok, n, true) == false) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to grow response buffer");
+        return false;
+    }
+    
+    // DEBUG
+    // fwrite(buf, 1, n, stdout);
+    // fflush(stdout);
+    
+    // prepare next batch
+    ai->chat.batch = llama_batch_get_one(&ai->chat.token_id, 1);
+    ai->chat.token_count++;
+    
+    return true;
+}
+
+static bool ai_chat_tokenize_input (ai_context *ai, const char *prompt) {
+    struct llama_context *ctx = ai->ctx;
+    const struct llama_vocab *vocab = ai->chat.vocab;
+    
+    // check if first execution
+    bool is_first = (llama_memory_seq_pos_max(llama_get_memory(ctx), 0) == -1);
+    
+    // count how many tokens prompt generates
+    int32_t prompt_len = (int32_t)strlen(prompt);
+    int32_t n_prompt_tokens = -llama_tokenize(vocab, prompt, prompt_len, NULL, 0, is_first, true);
+    if (n_prompt_tokens <= 0) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to determine prompt token count");
+        return false;
+    }
+    
+    // check if a new token allocation is required
+    if (ai->chat.ntokens < n_prompt_tokens) {
+        llama_token *prompt_tokens = sqlite3_malloc(sizeof(llama_token) * n_prompt_tokens);
+        if (!prompt_tokens) {
+            sqlite_common_set_error (ai->context, ai->vtab, SQLITE_NOMEM, "Failed to allocate prompt token buffer");
+            return false;
+        }
+        if (ai->chat.tokens) sqlite3_free(ai->chat.tokens);
+        ai->chat.tokens = prompt_tokens;
+        ai->chat.ntokens = n_prompt_tokens;
+    }
+    
+    // tokenize prompt
+    llama_token *prompt_tokens = ai->chat.tokens;
+    if (llama_tokenize(vocab, prompt, prompt_len, prompt_tokens, n_prompt_tokens, is_first, true) < 0) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to tokenize the prompt");
+        return false;
+    }
+    
+    // create initial batch
+    ai->chat.batch = llama_batch_get_one(prompt_tokens, n_prompt_tokens);
+    
+    return true;
+}
+
+static bool ai_chat_run (ai_context *ai, ai_cursor *c, const char *user_prompt) {
+    // TODO: what to do if template is not available?
+    const char *template = llama_model_chat_template(ai->model, NULL);
+    if (!template) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Template not available");
+        return false;
+    }
+    
+    const struct llama_vocab *vocab = llama_model_get_vocab(ai->model);
+    if (!vocab) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Model vocab not available");
+        return false;
+    }
+    
+    // setup context
+    ai->chat.vocab = vocab;
+    ai->chat.template = template;
+    ai_messages *messages = &ai->chat.messages;
+    buffer_t *formatted = &ai->chat.formatted;
+    
+    // save prompt input in history
+    if (!ai_messages_append(messages, ROLE_USER, user_prompt, false, true)) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to append message");
+        return false;
+    }
+    
+    // transform a list of messages (the context) into
+    // <|user|>What is AI?<|end|><|assistant|>AI stands for Artificial Intelligence...<|end|><|user|>Can you give an example?<|end|><|assistant|>...
+    int32_t new_len = llama_chat_apply_template(template, messages->items, messages->count, true, formatted->data, formatted->capacity);
+    if (new_len > formatted->capacity) {
+        if (buffer_resize(formatted, new_len * 2) == false) return false;
+        new_len = llama_chat_apply_template(template, messages->items, messages->count, true, formatted->data, formatted->capacity);
+    }
+    if ((new_len < 0) || (new_len > formatted->capacity)) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "failed to apply chat template");
+        return false;
+    }
+    
+    // check if there is enough space for the new formatted prompt
+    int32_t prompt_len = new_len - ai->chat.prev_len;
+    int32_t current_len = (int32_t)sqlite3_msize(ai->chat.prompt); // safe even if ai->chat.prompt is NULL
+    if (current_len < prompt_len + 1) {
+        char *buffer = (char *)sqlite3_malloc64(prompt_len + MIN_ALLOC_PROMPT);
+        if (!buffer) {
+            sqlite_common_set_error (ai->context, ai->vtab, SQLITE_NOMEM, "Failed to allocate prompt buffer");
+            return false;
+        }
+        if (ai->chat.prompt) sqlite3_free(ai->chat.prompt);
+        ai->chat.prompt = buffer;
+    }
+    
+    // build templated version of the user prompt
+    memcpy(ai->chat.prompt, formatted->data + ai->chat.prev_len, prompt_len);
+    ai->chat.prompt[prompt_len] = 0;
+    
+    // tokenize input prompt
+    if (!ai_chat_tokenize_input(ai, ai->chat.prompt)) return false;
+    
+    // if c is not NULL it means that reply must be streamed
+    if (c) return true;
+    
+    // do not stream response and incrementally build the buffer
+    bool is_eog = false;
+    while (1) {
+        if (!ai_chat_generate_response (ai, NULL, &is_eog)) return false;
+        if (is_eog) break;
+    }
+    
+    // save response
+    if (ai_chat_save_response(ai, messages, template) == false) return false;
+    
+    // return full respond
+    char *response = ai->chat.response.data;
+    sqlite3_result_text(ai->context, response, -1, SQLITE_TRANSIENT);
+    return true;
+}
+
+// MARK: -
 
 static int vt_chat_connect (sqlite3 *db, void *pAux, int argc, const char *const *argv, sqlite3_vtab **ppVtab, char **pzErr) {
     int rc = sqlite3_declare_vtab(db, "CREATE TABLE x(reply, dummy hidden);");
@@ -737,7 +953,12 @@ static int vt_chat_connect (sqlite3 *db, void *pAux, int argc, const char *const
     if (!vtab) return SQLITE_NOMEM;
     
     memset(vtab, 0, sizeof(ai_vtab));
-    vtab->ai = (ai_context *)pAux;
+    ai_context *ai = (ai_context *)pAux;
+    
+    vtab->ai = ai;
+    ai->db = db;
+    ai->context = NULL;
+    ai->vtab = (sqlite3_vtab *)vtab;
     
     *ppVtab = (sqlite3_vtab *)vtab;
     return SQLITE_OK;
@@ -777,8 +998,7 @@ static int vt_chat_cursor_open (sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCur
     c->ai = vtab->ai;
     
     ai_context *ai = c->ai;
-    int n_ctx = llama_n_ctx(ai->ctx);
-    buffer_create(&c->formatted, n_ctx);
+    if (ai_chat_check_context(ai) == false) return SQLITE_ERROR;
     
     *ppCursor = (sqlite3_vtab_cursor *)c;
     return SQLITE_OK;
@@ -786,14 +1006,21 @@ static int vt_chat_cursor_open (sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCur
 
 static int vt_chat_cursor_close (sqlite3_vtab_cursor *cur) {
     ai_cursor *c = (ai_cursor *)cur;
-    if (c->formatted.data) sqlite3_free(c->formatted.data);
-    if (c->messages.items) ai_messages_free(&c->messages);
+    ai_context *ai = c->ai;
+    
+    // save response when cursor closes
     sqlite3_free(c);
+    
+    ai_messages *messages = &ai->chat.messages;
+    const char *template = ai->chat.template;
+    if (ai_chat_save_response(ai, messages, template) == false) return SQLITE_ERROR;
+    
     return SQLITE_OK;
 }
 
 static int vt_chat_cursor_next (sqlite3_vtab_cursor *cur) {
     ai_cursor *c = (ai_cursor *)cur;
+    if (!ai_chat_generate_response (c->ai, c, NULL)) return SQLITE_ERROR;
     c->rowid++;
     return SQLITE_OK;
 }
@@ -806,8 +1033,7 @@ static int vt_chat_cursor_eof (sqlite3_vtab_cursor *cur) {
 static int vt_chat_cursor_column (sqlite3_vtab_cursor *cur, sqlite3_context *context, int iCol) {
     ai_cursor *c = (ai_cursor *)cur;
     if (iCol == AI_COLUMN_REPLY) {
-        ai_messages *messages = &c->messages;
-        sqlite3_result_text(context, messages->items[messages->count-1].content, -1, SQLITE_TRANSIENT);
+        sqlite3_result_text(context, c->ai->chat.token_text, c->ai->chat.token_len, SQLITE_TRANSIENT);
     }
     return SQLITE_OK;
 }
@@ -818,6 +1044,7 @@ static int vt_chat_cursor_rowid (sqlite3_vtab_cursor *cur, sqlite_int64 *pRowid)
     return SQLITE_OK;
 }
 
+/*
 static char *vt_chat_cursor_generate (sqlite3_vtab_cursor *cur, const char *prompt) {
     ai_cursor  *c = (ai_cursor *)cur;
     ai_context *ai = c->ai;
@@ -863,9 +1090,8 @@ static char *vt_chat_cursor_generate (sqlite3_vtab_cursor *cur, const char *prom
     // create initial batch
     llama_token new_token_id;
     llama_batch batch = llama_batch_get_one(prompt_tokens, n_prompt_tokens);
-    //sqlite3_free(prompt_tokens);
     
-    // TODO: must be in streaming here
+    //  must be in streaming here
     while (1) {
         // check context space
         int n_ctx = llama_n_ctx(ctx);
@@ -915,6 +1141,7 @@ static char *vt_chat_cursor_generate (sqlite3_vtab_cursor *cur, const char *prom
     
     return response.data;
 }
+ */
 
 static int vt_chat_cursor_filter (sqlite3_vtab_cursor *cur, int idxNum, const char *idxStr, int argc, sqlite3_value **argv) {
     ai_cursor *c = (ai_cursor *)cur;
@@ -929,50 +1156,13 @@ static int vt_chat_cursor_filter (sqlite3_vtab_cursor *cur, int idxNum, const ch
         return sqlite_vtab_set_error(&vtab->base, "ai_chat argument must be of type TEXT");
     }
     
-    const char *user_input = (const char *)sqlite3_value_text(argv[0]);
-    const char *template = llama_model_chat_template(ai->model, NULL);
-    ai_messages *messages = &c->messages;
-    buffer_t *formatted = &c->formatted;
+    ai->chat.token_count = 0;
+    buffer_reset(&ai->chat.formatted);
+    buffer_reset(&ai->chat.response);
     
-    if (!ai_messages_append(messages, ROLE_USER, user_input, true)) {
-        return sqlite_vtab_set_error(&vtab->base, "failed to append message");
-    }
-    
-    // transform a list of messages (the context) into
-    // <|user|>What is AI?<|end|><|assistant|>AI stands for Artificial Intelligence...<|end|><|user|>Can you give an example?<|end|><|assistant|>...
-    int32_t new_len = llama_chat_apply_template(template, messages->items, messages->count, true, formatted->data, formatted->capacity);
-    if (new_len > formatted->capacity) {
-        if (buffer_resize(formatted, new_len * 2) == false) return false;
-        new_len = llama_chat_apply_template(template, messages->items, messages->count, true, formatted->data, formatted->capacity);
-    }
-    if (new_len < 0) {
-        return sqlite_vtab_set_error(&vtab->base, "failed to apply chat template");
-    }
-    
-    // extract just the new prompt
-    int prompt_len = new_len - c->prev_len;
-    char *prompt = sqlite3_malloc(prompt_len + 1);
-    if (!prompt) {
-        return sqlite_vtab_set_error(&vtab->base, "failed to allocate prompt buffer");
-        
-    }
-    memcpy(prompt, formatted->data + c->prev_len, prompt_len);
-    prompt[prompt_len] = 0;
-    
-    char *response = vt_chat_cursor_generate(cur, prompt);
-    sqlite3_free(prompt);
-    if (response == NULL) return SQLITE_ERROR;
-    
-    if (!ai_messages_append(messages, ROLE_ASSISTANT, response, false)) {
-        sqlite_vtab_set_error(&vtab->base, "failed to append response");
-        sqlite3_free(response);
-        return SQLITE_ERROR;
-    }
-    
-    c->prev_len = llama_chat_apply_template(template, messages->items, messages->count, false, NULL, 0);
-    if (c->prev_len < 0) return sqlite_vtab_set_error(&vtab->base, "failed to apply chat template\n");
-    
-    return SQLITE_OK;
+    const char *user_prompt = (const char *)sqlite3_value_text(argv[0]);
+    bool result = ai_chat_run(ai, c, user_prompt);
+    return (result) ? SQLITE_OK : SQLITE_ERROR;
 }
 
 static sqlite3_module vt_chat = {
@@ -1003,47 +1193,172 @@ static sqlite3_module vt_chat = {
   /* xIntegrity  */ 0
 };
 
-static void ai_chat_create (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    
-}
+// MARK: -
 
 static void ai_chat_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    
+    // reset UUID and cleanup chat related memory
+    memset(ai->chat.uuid, 0, UUID_STR_MAXLEN);
+    
+    buffer_destroy(&ai->chat.response);
+    buffer_destroy(&ai->chat.formatted);
+    ai_messages_free(&ai->chat.messages);
+    
+    if (ai->chat.tokens) sqlite3_free(ai->chat.tokens);
+    ai->chat.ntokens = 0;
+    
+    if (ai->chat.prompt) sqlite3_free(ai->chat.prompt);
+    ai->chat.prev_len = 0;
 }
 
-static void ai_chat_reset (sqlite3_context *context, int argc, sqlite3_value **argv) {
+static void ai_chat_create (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    
+    // clean-up old chat (if any)
+    ai_chat_free(context, argc, argv);
+    if (ai_chat_check_context(ai) == false) return;
+    
+    // returns chat UUID
+    sqlite3_result_text(context, ai->chat.uuid, -1, SQLITE_TRANSIENT);
+}
+
+static bool ai_chat_check_tables (sqlite3_context *context) {
+    const char *sql = "CREATE TABLE IF NOT EXISTS ai_chat_history (id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE, title TEXT, metadata TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);";
+    
+    sqlite3 *db = sqlite3_context_db_handle(context);
+    int rc = sqlite_db_write_simple(context, db, sql);
+    if (rc != SQLITE_OK) return false;
+    
+    sql = "CREATE TABLE IF NOT EXISTS ai_chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL);";
+    rc = sqlite_db_write_simple(context, db, sql);
+    if (rc != SQLITE_OK) return false;
+    
+    return true;
 }
 
 static void ai_chat_save (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    // title, metadata
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (ai_chat_check_tables(context) == false) return;
+    
+    // sanity check if there is something to save
+    if (ai->chat.uuid[0] == 0) return;
+    if (ai->chat.messages.count == 0) return;
+    
+    // title, metadata
+    const char *title = ((argc >= 1) && (sqlite3_value_type(argv[0]) == SQLITE3_TEXT)) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
+    const char *meta =  ((argc >= 2) && (sqlite3_value_type(argv[1]) == SQLITE3_TEXT)) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
+    
+    sqlite3 *db = sqlite3_context_db_handle(context);
+    ai_messages *messages = &ai->chat.messages;
+    
+    // start transaction
+    sqlite_db_write_simple(context, db, "BEGIN;");
+    
+    // save chat
+    const char *sql = "INSERT INTO ai_chat_history (uuid, title, metadata) VALUES (?, ?, ?);";
+    const char *values[] = {ai->chat.uuid, title, meta};
+    int types[] = {SQLITE_TEXT, SQLITE_TEXT, SQLITE_TEXT};
+    int lens[] = {-1, -1, -1};
+    
+    int rc = sqlite_db_write(context, db, sql, values, types, lens, 3);
+    if (rc != SQLITE_OK) goto abort_save;
+        
+    // loop to save messages (the context)
+    char rowid_s[256];
+    sqlite3_int64 rowid = sqlite3_last_insert_rowid(db);
+    snprintf(rowid_s, sizeof(rowid_s), "%lld", (long long)rowid);
+    
+    sql = "INSERT INTO ai_chat_messages (chat_id, role, content) VALUES (?, ?, ?);";
+    int types2[] = {SQLITE_INTEGER, SQLITE_TEXT, SQLITE_TEXT};
+    
+    for (int i=0; i < messages->count; i++) {
+        const char *role = messages->items[i].role;
+        const char *content = messages->items[i].content;
+        const char *values2[] = {rowid_s, role, content};
+        int rc = sqlite_db_write(context, db, sql, values2, types2, lens, 3);
+        if (rc != SQLITE_OK) goto abort_save;
+    }
+    
+    // commit transaction and returns chat UUID
+    sqlite_db_write_simple(context, db, "COMMIT;");
+    sqlite3_result_text(context, ai->chat.uuid, -1, SQLITE_TRANSIENT);
+    return;
+    
+abort_save:
+    sqlite_db_write_simple(context, db, "ROLLBACK;");
 }
 
 static void ai_chat_restore (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // sanity check argument
+    int types[] = {SQLITE_TEXT};
+    if (sqlite_sanity_function(context, "ai_chat_restore", argc, argv, 1, types, false) == false) return;
+    
+    // free old chat (if any)
+    ai_chat_free(context, 0, NULL);
+    
     // UUID
+    const char *uuid = (const char *)sqlite3_value_text(argv[0]);
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    sqlite3 *db = sqlite3_context_db_handle(context);
+    
+    const char *sql = "SELECT m.role, m.content FROM ai_chat_messages m JOIN ai_chat_history h ON m.chat_id = h.id WHERE h.uuid = ? ORDER BY m.id ASC;";
+    sqlite3_stmt *vm = NULL;
+    int rc = sqlite3_prepare_v2(db, sql, -1, &vm, NULL);
+    if (rc != SQLITE_OK) goto abort_restore;
+    
+    rc = sqlite3_bind_text(vm, 1, uuid, -1, SQLITE_STATIC);
+    if (rc != SQLITE_OK) goto abort_restore;
+    
+    int counter = 0;
+    ai_messages *messages = &ai->chat.messages;
+    while (1) {
+        rc = sqlite3_step(vm);
+        if (rc == SQLITE_DONE) {rc = SQLITE_OK; break;}
+        if (rc != SQLITE_ROW) goto abort_restore;
+        
+        const char *role = (const char *)sqlite3_column_text(vm, 0);
+        const char *content = (const char *)sqlite3_column_text(vm, 1);
+        
+        if (!ai_messages_append(messages, role, content, true, true)) {
+            sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to append response");
+            rc = SQLITE_OK;
+            goto abort_restore;
+        }
+        ++counter;
+    }
+    
+    sqlite3_result_int(context, counter);
+    if (vm) sqlite3_finalize(vm);
+    return;
+    
+abort_restore:
+    if (rc != SQLITE_OK) sqlite3_result_error(context, sqlite3_errmsg(db), rc);
+    if (vm) sqlite3_finalize(vm);
 }
 
-// MARK: -
-
-static void ai_sampler_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
+static void ai_chat_respond (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    int types[] = {SQLITE_TEXT};
+    if (sqlite_sanity_function(context, "ai_chat_respond", argc, argv, 1, types, true) == false) return;
+    
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (ai->sampler) llama_sampler_free(ai->sampler);
-    ai->sampler = NULL;
+    if (ai_chat_check_context(ai) == false) return;
+    
+    const char *user_prompt = (const char *)sqlite3_value_text(argv[0]);
+    ai->context = context;
+    ai->vtab = NULL;
+    
+    ai->chat.token_count = 0;
+    buffer_reset(&ai->chat.formatted);
+    buffer_reset(&ai->chat.response);
+    ai_chat_run(ai, NULL, user_prompt);
 }
 
-static void ai_sampler_create (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (ai->sampler) llama_sampler_free(ai->sampler);
-    ai->sampler = NULL;
-    ai_sampler_check(context);
-}
+// MARK: - Sampler -
 
 static void ai_sampler_init_greedy (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) llama_sampler_chain_add(ai->sampler, llama_sampler_init_greedy());
 }
 
@@ -1054,7 +1369,7 @@ static void ai_sampler_init_dist (sqlite3_context *context, int argc, sqlite3_va
     }
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         int32_t seed = (argc == 1) ? (int32_t)sqlite3_value_int64(argv[0]) : (int32_t)LLAMA_DEFAULT_SEED;
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_dist(seed));
@@ -1062,11 +1377,13 @@ static void ai_sampler_init_dist (sqlite3_context *context, int argc, sqlite3_va
 }
 
 static void ai_sampler_init_top_k (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Top-K sampling described in academic paper "The Curious Case of Neural Text Degeneration" https://arxiv.org/abs/1904.09751
+    
     int types[] = {SQLITE_INTEGER};
     if (sqlite_sanity_function(context, "ai_sampler_init_top_k", argc, argv, 1, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         int32_t k = (int32_t)sqlite3_value_int64(argv[0]);
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_top_k(k));
@@ -1074,11 +1391,13 @@ static void ai_sampler_init_top_k (sqlite3_context *context, int argc, sqlite3_v
 }
 
 static void ai_sampler_init_top_p (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Nucleus sampling described in academic paper "The Curious Case of Neural Text Degeneration" https://arxiv.org/abs/1904.09751
+    
     int types[] = {SQLITE_FLOAT, SQLITE_INTEGER};
     if (sqlite_sanity_function(context, "ai_sampler_init_top_p", argc, argv, 2, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
         size_t min_keep = (size_t)sqlite3_value_int64(argv[1]);
@@ -1087,11 +1406,13 @@ static void ai_sampler_init_top_p (sqlite3_context *context, int argc, sqlite3_v
 }
 
 static void ai_sampler_init_min_p (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Minimum P sampling as described in https://github.com/ggml-org/llama.cpp/pull/3841
+    
     int types[] = {SQLITE_FLOAT, SQLITE_INTEGER};
     if (sqlite_sanity_function(context, "ai_sampler_init_min_p", argc, argv, 2, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
         size_t min_keep = (size_t)sqlite3_value_int64(argv[1]);
@@ -1100,11 +1421,13 @@ static void ai_sampler_init_min_p (sqlite3_context *context, int argc, sqlite3_v
 }
 
 static void ai_sampler_init_typical (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Locally Typical Sampling implementation described in the paper https://arxiv.org/abs/2202.00666
+    
     int types[] = {SQLITE_FLOAT, SQLITE_INTEGER};
     if (sqlite_sanity_function(context, "llama_sampler_init_typical", argc, argv, 2, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
         size_t min_keep = (size_t)sqlite3_value_int64(argv[1]);
@@ -1117,7 +1440,7 @@ static void ai_sampler_init_temp (sqlite3_context *context, int argc, sqlite3_va
     if (sqlite_sanity_function(context, "llama_sampler_init_temp", argc, argv, 1, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         float t = (float)sqlite3_value_double(argv[0]);
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_temp(t));
@@ -1125,11 +1448,13 @@ static void ai_sampler_init_temp (sqlite3_context *context, int argc, sqlite3_va
 }
 
 static void ai_sampler_init_temp_ext (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Dynamic temperature implementation (a.k.a. entropy) described in the paper https://arxiv.org/abs/2309.02772
+    
     int types[] = {SQLITE_FLOAT, SQLITE_FLOAT, SQLITE_FLOAT};
     if (sqlite_sanity_function(context, "ai_sampler_init_temp_ext", argc, argv, 3, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         float t = (float)sqlite3_value_double(argv[0]);
         float delta = (float)sqlite3_value_double(argv[1]);
@@ -1139,11 +1464,13 @@ static void ai_sampler_init_temp_ext (sqlite3_context *context, int argc, sqlite
 }
 
 static void ai_sampler_init_xtc (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // XTC sampler as described in https://github.com/oobabooga/text-generation-webui/pull/6335
+    
     int types[] = {SQLITE_FLOAT, SQLITE_FLOAT, SQLITE_INTEGER, SQLITE_INTEGER};
     if (sqlite_sanity_function(context, "ai_sampler_init_xtc", argc, argv, 4, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
         float t = (float)sqlite3_value_double(argv[1]);
@@ -1154,11 +1481,13 @@ static void ai_sampler_init_xtc (sqlite3_context *context, int argc, sqlite3_val
 }
 
 static void ai_sampler_init_top_n_sigma (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Top n sigma sampling as described in academic paper "Top-nσ: Not All Logits Are You Need" https://arxiv.org/pdf/2411.07641
+    
     int types[] = {SQLITE_FLOAT};
     if (sqlite_sanity_function(context, "ai_sampler_init_top_n_sigma", argc, argv, 1, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         float n = (float)sqlite3_value_double(argv[0]);
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_top_n_sigma(n));
@@ -1166,6 +1495,8 @@ static void ai_sampler_init_top_n_sigma (sqlite3_context *context, int argc, sql
 }
 
 static void ai_sampler_init_mirostat (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Mirostat 1.0 algorithm described in the paper https://arxiv.org/abs/2007.14966. Uses tokens instead of words.
+    
     int types[] = {SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_FLOAT, SQLITE_INTEGER};
     if (sqlite_sanity_function(context, "ai_sampler_init_mirostat", argc, argv, 4, types, true) == false) return;
     
@@ -1176,7 +1507,7 @@ static void ai_sampler_init_mirostat (sqlite3_context *context, int argc, sqlite
         return;
     }
     
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         uint32_t seed = (uint32_t)sqlite3_value_int64(argv[0]);
         float tau = (float)sqlite3_value_double(argv[1]);
@@ -1187,11 +1518,13 @@ static void ai_sampler_init_mirostat (sqlite3_context *context, int argc, sqlite
 }
 
 static void ai_sampler_init_mirostat_v2 (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Mirostat 2.0 algorithm described in the paper https://arxiv.org/abs/2007.14966. Uses tokens instead of words.
+    
     int types[] = {SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_FLOAT};
     if (sqlite_sanity_function(context, "ai_sampler_init_mirostat_v2", argc, argv, 3, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         uint32_t seed = (uint32_t)sqlite3_value_int64(argv[0]);
         float tau = (float)sqlite3_value_double(argv[1]);
@@ -1211,7 +1544,7 @@ static void ai_sampler_init_grammar (sqlite3_context *context, int argc, sqlite3
         return;
     }
     
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         const char *grammar_str = (const char *)sqlite3_value_text(argv[0]);
         const char *grammar_root = (const char *)sqlite3_value_text(argv[1]);
@@ -1227,24 +1560,18 @@ static void ai_sampler_init_infill (sqlite3_context *context, int argc, sqlite3_
         return;
     }
     
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_infill(vocab));
     }
 }
-
-
-// llama_sampler_init_dry(const struct llama_vocab *  vocab, int32_t    n_ctx_train, float    dry_multiplier, float    dry_base, int32_t    dry_allowed_length, int32_t    dry_penalty_last_n, const char ** seq_breakers, size_t    num_breakers)
-
-// llama_sampler_init_logit_bias( int32_t   n_vocab, int32_t   n_logit_bias, const llama_logit_bias * logit_bias)
-
 
 static void ai_sampler_init_penalties (sqlite3_context *context, int argc, sqlite3_value **argv) {
     int types[] = {SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_FLOAT, SQLITE_FLOAT};
     if (sqlite_sanity_function(context, "ai_sampler_init_penalties", argc, argv, 4, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(context);
+    ai_sampler_check(ai);
     if (ai->sampler) {
         int32_t penalty_last_n = (int32_t)sqlite3_value_int64(argv[0]);
         float penalty_repeat = (float)sqlite3_value_double(argv[1]);
@@ -1254,7 +1581,20 @@ static void ai_sampler_init_penalties (sqlite3_context *context, int argc, sqlit
     }
 }
 
-// MARK: -
+// MARK: - General -
+
+static void ai_sampler_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (ai->sampler) llama_sampler_free(ai->sampler);
+    ai->sampler = NULL;
+}
+
+static void ai_sampler_create (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (ai->sampler) llama_sampler_free(ai->sampler);
+    ai->sampler = NULL;
+    ai_sampler_check(ai);
+}
 
 static void ai_context_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
@@ -1268,25 +1608,35 @@ static void ai_context_create (sqlite3_context *context, int argc, sqlite3_value
     const char *options = (argc == 1) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(context, options, ai_options_callback, &ai->options) == false) return;
+    if (parse_keyvalue_string(options, ai_options_callback, &ai->options) == false) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
+        return;
+    }
     
     if (ai->ctx) ai_context_free(context, 0, NULL);
-    ai->ctx = ai_context_check(context);
+    ai->ctx = ai_context_check(ai);
 }
 
-static void ai_model_set (sqlite3_context *context, int argc, sqlite3_value **argv) {
+static void ai_model_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (ai->model) llama_model_free(ai->model);
+    if (ai->ctx) llama_free(ai->ctx);
+    ai->model = NULL;
+    ai->ctx = NULL;
+}
+
+static void ai_model_load (sqlite3_context *context, int argc, sqlite3_value **argv) {
     // sanity check arguments
-    if (ai_common_args_check(context, "ai_model_set", argc, argv, false) == false) return;
+    if (ai_common_args_check(context, "ai_model_load", argc, argv, false) == false) return;
     
-    // TODO: model_arg can be a path or a name inside the ai_models table
-    char path[MAX_PATH];
-    const char *model_arg = (const char *)sqlite3_value_text(argv[0]);
-    const char *p = db_check_model(sqlite3_context_db_handle(context), model_arg, path, sizeof(path));
-    const char *model_path = (p) ? p : model_arg;
+    const char *model_path = (const char *)sqlite3_value_text(argv[0]);
     const char *model_options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(context, model_options, ai_options_callback, &ai->options) == false) return;
+    if (parse_keyvalue_string(model_options, ai_options_callback, &ai->options) == false) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", model_options);
+        return;
+    }
     
     struct llama_model_params model_params = llama_model_default_params();
     ai_set_model_options(&model_params, &ai->options);
@@ -1296,7 +1646,7 @@ static void ai_model_set (sqlite3_context *context, int argc, sqlite3_value **ar
         return;
     }
     
-    if (ai->model) llama_model_free(ai->model);
+    ai_cleanup((void *)ai);
     ai->model = model;
 }
 
@@ -1330,7 +1680,7 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     sqlite3_exec(db, LOG_TABLE_DECLARATION, NULL, NULL, NULL);
     
     // init context
-    void *ctx = ai_sqlite_context_create(db);
+    void *ctx = ai_create(db);
     if (!ctx) {
         if (pzErrMsg) *pzErrMsg = sqlite3_mprintf("Out of memory: failed to allocate AI extension context.");
         return SQLITE_NOMEM;
@@ -1341,16 +1691,19 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     
     // register public functions
     int rc = SQLITE_OK;
-    rc = sqlite3_create_function_v2(db, "ai_version", 0, SQLITE_UTF8, ctx, ai_version, NULL, NULL, ai_sqlite_context_free);
+    rc = sqlite3_create_function_v2(db, "ai_version", 0, SQLITE_UTF8, ctx, ai_version, NULL, NULL, ai_cleanup);
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function_v2(db, "ai_log_info", 1, SQLITE_UTF8, ctx, ai_log_info, NULL, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
-    rc = sqlite3_create_function(db, "ai_model_set", 1, SQLITE_UTF8, ctx, ai_model_set, NULL, NULL);
+    rc = sqlite3_create_function(db, "ai_model_load", 1, SQLITE_UTF8, ctx, ai_model_load, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
-    rc = sqlite3_create_function(db, "ai_model_set", 2, SQLITE_UTF8, ctx, ai_model_set, NULL, NULL);
+    rc = sqlite3_create_function(db, "ai_model_load", 2, SQLITE_UTF8, ctx, ai_model_load, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "ai_model_free", 0, SQLITE_UTF8, ctx, ai_model_free, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "ai_context_create", 0, SQLITE_UTF8, ctx, ai_context_create, NULL, NULL);
@@ -1441,13 +1794,13 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     rc = sqlite3_create_function(db, "ai_chat_free", 0, SQLITE_UTF8, ctx, ai_chat_free, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
-    rc = sqlite3_create_function(db, "ai_chat_reset", 0, SQLITE_UTF8, ctx, ai_chat_reset, NULL, NULL);
-    if (rc != SQLITE_OK) goto cleanup;
-    
-    rc = sqlite3_create_function(db, "ai_chat_save", 2, SQLITE_UTF8, ctx, ai_chat_save, NULL, NULL);
+    rc = sqlite3_create_function(db, "ai_chat_save", -1, SQLITE_UTF8, ctx, ai_chat_save, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "ai_chat_restore", 1, SQLITE_UTF8, ctx, ai_chat_restore, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "ai_chat_respond", 1, SQLITE_UTF8, ctx, ai_chat_respond, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
 cleanup:
