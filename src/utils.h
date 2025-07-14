@@ -25,7 +25,10 @@ typedef struct {
     uint32_t            length;                 // currently used size
 } buffer_t;
 
+// callbacks
 typedef bool (*keyvalue_callback)(void *xdata, const char *key, int key_len, const char *value, int value_len);
+typedef void (*audio_list_devices_callback)(uint32_t count, uint32_t index, const char *name, bool is_default, void *xdata);
+
 bool parse_keyvalue_string (const char *str, keyvalue_callback callback, void *xdata);
 
 bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, int argc, sqlite3_value **argv, int ntypes, int *types, bool check_model);
@@ -43,5 +46,13 @@ void buffer_reset (buffer_t *b);
 void buffer_destroy (buffer_t *b);
 
 char *ai_uuid_v7_string (char value[UUID_STR_MAXLEN], bool dash_format);
+
+float *audio_wav_file2pcm (const char *wav_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels);
+float *audio_wav_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels);
+float *audio_flac_file2pcm (const char *flac_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels);
+float *audio_flac_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels);
+float *audio_mp3_file2pcm (const char *mp3_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels);
+float *audio_mp3_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels);
+int    audio_list_devices (void *xdata, audio_list_devices_callback input_devices_cb, audio_list_devices_callback output_devices_cb);
 
 #endif

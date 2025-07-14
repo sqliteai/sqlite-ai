@@ -5,7 +5,11 @@
 //  Created by Marco Bambini on 27/06/25.
 //
 
+#define MINIAUDIO_IMPLEMENTATION
+
 #include "utils.h"
+#include "miniaudio.h"
+
 #include <stdio.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -37,7 +41,23 @@ SQLITE_EXTENSION_INIT3
 // defined in sqlite-ai.c
 bool ai_model_check (sqlite3_context *context);
 
-// MARK: -
+// MARK: - Memory Wrappers -
+
+static void *memalloc_wrapper (size_t size, void *xdata) {
+    return sqlite3_malloc64(size);
+}
+
+static void *memralloc_wrapper (void *ptr, size_t size, void *xdata) {
+    return sqlite3_realloc64(ptr, size);
+}
+
+static void memfree_wrapper (void *ptr, void *xdata) {
+    sqlite3_free(ptr);
+}
+
+static const ma_allocation_callbacks mem_callbacks = {NULL, memalloc_wrapper, memralloc_wrapper, memfree_wrapper};
+
+// MARK: - Dynamic Buffer -
 
 bool buffer_create (buffer_t *b, uint32_t size) {
     if (size < MIN_BUFFER_SIZE) size = MIN_BUFFER_SIZE;
@@ -188,7 +208,7 @@ cleanup:
 }
  */
 
-// MARK: -
+// MARK: - SQLite -
 
 static const char *sqlite_type_name (int type) {
     switch (type) {
@@ -332,7 +352,7 @@ char *sqlite_strdup (const char *str) {
     return result;
 }
 
-// MARK: -
+// MARK: - UUIDv7 -
 
 int ai_uuid_v7_generate (uint8_t value[UUID_LEN]) {
     // fill the buffer with high-quality random data
@@ -394,7 +414,81 @@ char *ai_uuid_v7_string (char value[UUID_STR_MAXLEN], bool dash_format) {
     return ai_uuid_v7_stringify(uuid, value, dash_format);
 }
 
-// MARK: -
+// MARK: - Audio -
+
+float *audio_wav_file2pcm (const char *wav_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels) {
+    return ma_dr_wav_open_file_and_read_pcm_frames_f32(wav_path, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *) num_samples, &mem_callbacks);
+}
+
+float *audio_wav_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels) {
+    return ma_dr_wav_open_memory_and_read_pcm_frames_f32(data, data_size, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *) num_samples, &mem_callbacks);
+}
+
+float *audio_flac_file2pcm (const char *flac_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels) {
+    return ma_dr_flac_open_file_and_read_pcm_frames_f32(flac_path, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *) num_samples, &mem_callbacks);
+}
+
+float *audio_flac_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels) {
+    return ma_dr_flac_open_memory_and_read_pcm_frames_f32(data, data_size, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *) num_samples, &mem_callbacks);
+}
+
+float *audio_mp3_file2pcm (const char *mp3_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels) {
+    return ma_dr_flac_open_file_and_read_pcm_frames_f32(mp3_path, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *) num_samples, &mem_callbacks);
+}
+
+float *audio_mp3_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels) {
+    ma_dr_mp3_config config = {0};
+    
+    float *buffer = ma_dr_mp3_open_memory_and_read_pcm_frames_f32(data, data_size, &config, (ma_uint64 *) num_samples, &mem_callbacks);
+    if (channels) *channels = (uint32_t)config.channels;
+    if (sample_rate) *sample_rate = (uint32_t)config.sampleRate;
+    return buffer;
+}
+
+int audio_list_devices (void *xdata, audio_list_devices_callback input_devices_cb, audio_list_devices_callback output_devices_cb) {
+    // if no callbacks do nothing
+    if (input_devices_cb == NULL && output_devices_cb == NULL) return 0;
+    
+    ma_context context;
+    ma_context_config config = ma_context_config_init();
+    ma_result result = ma_context_init(NULL, 0, &config, &context);
+    if (result != MA_SUCCESS) return -1;
+    
+    ma_device_info *pPlaybackInfos = NULL;
+    ma_uint32 playbackCount = 0;
+    ma_device_info *pCaptureInfos = NULL;
+    ma_uint32 captureCount = 0;
+    
+    bool list_input = (input_devices_cb != NULL);
+    bool list_output = (output_devices_cb != NULL);
+    
+    result = ma_context_get_devices(&context, (list_output) ? &pPlaybackInfos : NULL, (list_output) ? &playbackCount : NULL,
+                                              (list_input) ? &pCaptureInfos : NULL, (list_input) ? &captureCount : NULL);
+    if (result != MA_SUCCESS) {
+        ma_context_uninit(&context);
+        return -2;
+    }
+    
+    int count = 0;
+    if (list_input) {
+        for (ma_uint32 i = 0; i < captureCount; ++i) {
+            input_devices_cb(captureCount, i+1, pCaptureInfos[i].name, pCaptureInfos[i].isDefault, xdata);
+        }
+        count += captureCount;
+    }
+    
+    if (list_output) {
+        for (ma_uint32 i = 0; i < playbackCount; ++i) {
+            output_devices_cb(playbackCount, i+1, pPlaybackInfos[i].name, pPlaybackInfos[i].isDefault, xdata);
+        }
+        count += playbackCount;
+    }
+    
+    ma_context_uninit(&context);
+    return count;
+}
+
+// MARK: - General -
 
 bool parse_keyvalue_string (const char *str, keyvalue_callback callback, void *xdata) {
     if (!str) return true;
