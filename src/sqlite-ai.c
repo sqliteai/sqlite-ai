@@ -104,7 +104,7 @@ typedef struct {
     // ** CUSTOM **
     int32_t                     max_tokens;         // to control max allowed tokens to generate (to control user's input size)
     
-} ai_options;
+} llm_options;
 
 typedef struct {
     llama_chat_message *items;
@@ -122,7 +122,7 @@ typedef struct {
     struct llama_model          *model;
     struct llama_context        *ctx;
     struct llama_sampler        *sampler;
-    ai_options                  options;
+    llm_options                 options;
     
     // chat
     struct {
@@ -165,16 +165,35 @@ const char *ROLE_ASSISTANT  = "assistant";
 
 // MARK: -
 
-static void ai_options_init (ai_options *options) {
-    memset(options, 0, sizeof(ai_options));
+void llm_set_model_options (struct llama_model_params *model_params, llm_options *options) {
+    // number of layers to store in VRAM
+    if (options->gpu_layers) model_params->n_gpu_layers = options->gpu_layers;
+    if (options->split_mode) model_params->split_mode = options->split_mode;
+    if (options->main_gpu) model_params->main_gpu = options->main_gpu;
+    if (options->vocab_only) model_params->vocab_only = options->vocab_only;
+    if (options->use_mmap) model_params->use_mmap = options->use_mmap;
+    if (options->use_mlock) model_params->use_mlock = options->use_mlock;
+    if (options->check_tensors) model_params->check_tensors = options->check_tensors;
+}
+
+void llm_set_context_options (struct llama_context_params *llama_context, llm_options *options) {
+    if (options->generate_embedding) llama_context->embeddings = true;
+    if (options->context_size) {
+        llama_context->n_ctx = options->context_size;
+        llama_context->n_batch = options->context_size;
+    }
+}
+
+static void llm_options_init (llm_options *options) {
+    memset(options, 0, sizeof(llm_options));
     
     options->normalize_embedding = true;
     options->max_tokens = 0;    // no limits
     options->log_info = false;  // disable INFO messages logging
 }
 
-static bool ai_options_callback (void *xdata, const char *key, int key_len, const char *value, int value_len) {
-    ai_options *options = (ai_options *)xdata;
+static bool llm_options_callback (void *xdata, const char *key, int key_len, const char *value, int value_len) {
+    llm_options *options = (llm_options *)xdata;
     
     // sanity check (ignore malformed key/value)
     if (!key || key_len == 0) return true;
@@ -234,10 +253,25 @@ static bool ai_options_callback (void *xdata, const char *key, int key_len, cons
     return true;
 }
 
+struct llama_sampler *llm_sampler_check (ai_context *ai) {
+    if (ai->sampler) return ai->sampler;
+    
+    struct llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
+    struct llama_sampler *sampler = llama_sampler_chain_init(sampler_params);
+    if (!sampler) {
+        sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "Unable to create sampler");
+        return NULL;
+    }
+    ai->sampler = sampler;
+    return sampler;
+}
+
+// MARK: -
+
 void *ai_create (sqlite3 *db) {
     ai_context *ai = (ai_context *)sqlite3_malloc(sizeof(ai_context));
     if (ai) {
-        ai_options_init(&ai->options);
+        llm_options_init(&ai->options);
         ai->db = db;
     }
     return ai;
@@ -253,7 +287,7 @@ static void ai_cleanup (void *ctx) {
     if (ai->model) llama_model_free(ai->model);
     if (ai->ctx) llama_free(ai->ctx);
     if (ai->sampler) llama_sampler_free(ai->sampler);
-    ai_options_init(&ai->options);
+    llm_options_init(&ai->options);
     
     ai->model = NULL;
     ai->ctx = NULL;
@@ -285,25 +319,6 @@ void ai_logger (enum ggml_log_level level, const char *text, void *user_data) {
     sqlite_db_write(NULL, ai->db, LOG_TABLE_INSERT_STMT, values, types, lens, 2);
 }
 
-void ai_set_model_options (struct llama_model_params *model_params, ai_options *options) {
-    // number of layers to store in VRAM
-    if (options->gpu_layers) model_params->n_gpu_layers = options->gpu_layers;
-    if (options->split_mode) model_params->split_mode = options->split_mode;
-    if (options->main_gpu) model_params->main_gpu = options->main_gpu;
-    if (options->vocab_only) model_params->vocab_only = options->vocab_only;
-    if (options->use_mmap) model_params->use_mmap = options->use_mmap;
-    if (options->use_mlock) model_params->use_mlock = options->use_mlock;
-    if (options->check_tensors) model_params->check_tensors = options->check_tensors;
-}
-
-void ai_set_context_options (struct llama_context_params *llama_context, ai_options *options) {
-    if (options->generate_embedding) llama_context->embeddings = true;
-    if (options->context_size) {
-        llama_context->n_ctx = options->context_size;
-        llama_context->n_batch = options->context_size;
-    }
-}
-
 bool ai_model_check (sqlite3_context *context) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     if (!ai) return false;
@@ -314,7 +329,7 @@ struct llama_context *ai_context_check (ai_context *ai) {
     if (ai->ctx) return ai->ctx;
     
     struct llama_context_params ctx_params = llama_context_default_params();
-    ai_set_context_options(&ctx_params, &ai->options);
+    llm_set_context_options(&ctx_params, &ai->options);
     
     struct llama_context *ctx = llama_init_from_model(ai->model, ctx_params);
     if (!ctx) {
@@ -323,19 +338,6 @@ struct llama_context *ai_context_check (ai_context *ai) {
     }
     
     return ctx;
-}
-
-struct llama_sampler *ai_sampler_check (ai_context *ai) {
-    if (ai->sampler) return ai->sampler;
-    
-    struct llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
-    struct llama_sampler *sampler = llama_sampler_chain_init(sampler_params);
-    if (!sampler) {
-        sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "Unable to create sampler");
-        return NULL;
-    }
-    ai->sampler = sampler;
-    return sampler;
 }
 
 static bool ai_common_args_check (sqlite3_context *context, const char *function_name, int argc, sqlite3_value **argv, bool check_model) {
@@ -574,7 +576,7 @@ static void llm_embed_generate (sqlite3_context *context, int argc, sqlite3_valu
     const char *model_options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(model_options, ai_options_callback, &ai->options) == false) return;
+    if (parse_keyvalue_string(model_options, llm_options_callback, &ai->options) == false) return;
     
     if (!text || text_len == 0) return;
     llm_embed_generate_run(context, text, text_len);
@@ -630,7 +632,7 @@ static void llm_text_run (sqlite3_context *context, const char *text, int32_t te
     
     // initialize the sampler
     bool sampler_already_setup = (ai->sampler != NULL);
-    struct llama_sampler *sampler = ai_sampler_check(ai);
+    struct llama_sampler *sampler = llm_sampler_check(ai);
     if (!sampler) return;
     if (!sampler_already_setup) {
         // no sampler was setup, so initialize it with some default values
@@ -704,7 +706,7 @@ static void llm_text_generate (sqlite3_context *context, int argc, sqlite3_value
     const char *options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(options, ai_options_callback, &ai->options) == false) {
+    if (parse_keyvalue_string(options, llm_options_callback, &ai->options) == false) {
         sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
         return;
     }
@@ -719,7 +721,7 @@ static bool llm_chat_check_context (ai_context *ai) {
     // check context
     if (!ai->ctx) {
         const char *options = "context_size=4096,n_gpu_layers=99";
-        if (parse_keyvalue_string(options, ai_options_callback, &ai->options) == false) {
+        if (parse_keyvalue_string(options, llm_options_callback, &ai->options) == false) {
             sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
             return false;
         }
@@ -729,7 +731,7 @@ static bool llm_chat_check_context (ai_context *ai) {
     
     // check sampler
     if (!ai->sampler) {
-        ai_sampler_check(ai);
+        llm_sampler_check(ai);
         if (ai->sampler == NULL) return false;
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_min_p(0.05, 1));
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_temp(0.8));
@@ -1259,7 +1261,7 @@ static void llm_chat_respond (sqlite3_context *context, int argc, sqlite3_value 
 
 static void llm_sampler_init_greedy (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) llama_sampler_chain_add(ai->sampler, llama_sampler_init_greedy());
 }
 
@@ -1270,7 +1272,7 @@ static void llm_sampler_init_dist (sqlite3_context *context, int argc, sqlite3_v
     }
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         int32_t seed = (argc == 1) ? (int32_t)sqlite3_value_int64(argv[0]) : (int32_t)LLAMA_DEFAULT_SEED;
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_dist(seed));
@@ -1284,7 +1286,7 @@ static void llm_sampler_init_top_k (sqlite3_context *context, int argc, sqlite3_
     if (sqlite_sanity_function(context, "llm_sampler_init_top_k", argc, argv, 1, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         int32_t k = (int32_t)sqlite3_value_int64(argv[0]);
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_top_k(k));
@@ -1298,7 +1300,7 @@ static void llm_sampler_init_top_p (sqlite3_context *context, int argc, sqlite3_
     if (sqlite_sanity_function(context, "llm_sampler_init_top_p", argc, argv, 2, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
         size_t min_keep = (size_t)sqlite3_value_int64(argv[1]);
@@ -1313,7 +1315,7 @@ static void llm_sampler_init_min_p (sqlite3_context *context, int argc, sqlite3_
     if (sqlite_sanity_function(context, "llm_sampler_init_min_p", argc, argv, 2, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
         size_t min_keep = (size_t)sqlite3_value_int64(argv[1]);
@@ -1328,7 +1330,7 @@ static void llm_sampler_init_typical (sqlite3_context *context, int argc, sqlite
     if (sqlite_sanity_function(context, "llm_sampler_init_typical", argc, argv, 2, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
         size_t min_keep = (size_t)sqlite3_value_int64(argv[1]);
@@ -1341,7 +1343,7 @@ static void llm_sampler_init_temp (sqlite3_context *context, int argc, sqlite3_v
     if (sqlite_sanity_function(context, "llm_sampler_init_temp", argc, argv, 1, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         float t = (float)sqlite3_value_double(argv[0]);
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_temp(t));
@@ -1355,7 +1357,7 @@ static void llm_sampler_init_temp_ext (sqlite3_context *context, int argc, sqlit
     if (sqlite_sanity_function(context, "llm_sampler_init_temp_ext", argc, argv, 3, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         float t = (float)sqlite3_value_double(argv[0]);
         float delta = (float)sqlite3_value_double(argv[1]);
@@ -1371,7 +1373,7 @@ static void llm_sampler_init_xtc (sqlite3_context *context, int argc, sqlite3_va
     if (sqlite_sanity_function(context, "llm_sampler_init_xtc", argc, argv, 4, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
         float t = (float)sqlite3_value_double(argv[1]);
@@ -1388,7 +1390,7 @@ static void llm_sampler_init_top_n_sigma (sqlite3_context *context, int argc, sq
     if (sqlite_sanity_function(context, "llm_sampler_init_top_n_sigma", argc, argv, 1, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         float n = (float)sqlite3_value_double(argv[0]);
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_top_n_sigma(n));
@@ -1408,7 +1410,7 @@ static void llm_sampler_init_mirostat (sqlite3_context *context, int argc, sqlit
         return;
     }
     
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         uint32_t seed = (uint32_t)sqlite3_value_int64(argv[0]);
         float tau = (float)sqlite3_value_double(argv[1]);
@@ -1425,7 +1427,7 @@ static void llm_sampler_init_mirostat_v2 (sqlite3_context *context, int argc, sq
     if (sqlite_sanity_function(context, "llm_sampler_init_mirostat_v2", argc, argv, 3, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         uint32_t seed = (uint32_t)sqlite3_value_int64(argv[0]);
         float tau = (float)sqlite3_value_double(argv[1]);
@@ -1445,7 +1447,7 @@ static void llm_sampler_init_grammar (sqlite3_context *context, int argc, sqlite
         return;
     }
     
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         const char *grammar_str = (const char *)sqlite3_value_text(argv[0]);
         const char *grammar_root = (const char *)sqlite3_value_text(argv[1]);
@@ -1461,7 +1463,7 @@ static void llm_sampler_init_infill (sqlite3_context *context, int argc, sqlite3
         return;
     }
     
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_infill(vocab));
     }
@@ -1472,7 +1474,7 @@ static void llm_sampler_init_penalties (sqlite3_context *context, int argc, sqli
     if (sqlite_sanity_function(context, "llm_sampler_init_penalties", argc, argv, 4, types, true) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
     if (ai->sampler) {
         int32_t penalty_last_n = (int32_t)sqlite3_value_int64(argv[0]);
         float penalty_repeat = (float)sqlite3_value_double(argv[1]);
@@ -1494,7 +1496,7 @@ static void llm_sampler_create (sqlite3_context *context, int argc, sqlite3_valu
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     if (ai->sampler) llama_sampler_free(ai->sampler);
     ai->sampler = NULL;
-    ai_sampler_check(ai);
+    llm_sampler_check(ai);
 }
 
 static void llm_context_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -1509,7 +1511,7 @@ static void llm_context_create (sqlite3_context *context, int argc, sqlite3_valu
     const char *options = (argc == 1) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(options, ai_options_callback, &ai->options) == false) {
+    if (parse_keyvalue_string(options, llm_options_callback, &ai->options) == false) {
         sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
         return;
     }
@@ -1534,13 +1536,13 @@ static void llm_model_load (sqlite3_context *context, int argc, sqlite3_value **
     const char *model_options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(model_options, ai_options_callback, &ai->options) == false) {
+    if (parse_keyvalue_string(model_options, llm_options_callback, &ai->options) == false) {
         sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", model_options);
         return;
     }
     
     struct llama_model_params model_params = llama_model_default_params();
-    ai_set_model_options(&model_params, &ai->options);
+    llm_set_model_options(&model_params, &ai->options);
     struct llama_model *model = llama_model_load_from_file(model_path, model_params);
     if (!model) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Unable to load model from file %s", model_path);
