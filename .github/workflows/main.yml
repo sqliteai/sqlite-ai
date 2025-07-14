@@ -22,7 +22,7 @@ jobs:
           - os: LinuxARM64
             arch: arm64
             name: linux-vulkan
-            make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
+            make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
           - os: macos-latest
             name: macos
           - os: windows-latest
@@ -63,13 +63,28 @@ jobs:
             mingw-w64-x86_64-cmake
             make
 
+      - name: linux install dependencies
+        if: matrix.name == 'linux-vulkan'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential wget git cmake ccache sqlite3 libcurl4-openssl-dev
+
       - name: linux install vulkan
         if: matrix.name == 'linux-vulkan'
         run: |
           wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
           sudo apt-get update -y
-          sudo apt-get install -y build-essential mesa-vulkan-drivers vulkan-sdk libcurl4-openssl-dev
+          sudo apt-get install -y mesa-vulkan-drivers
+          # Vulkan is no longer packed for Ubuntu
+          wget https://sdk.lunarg.com/sdk/download/latest/linux/vulkan-sdk.tar.xz?Human=true -O vulkan-sdk.tar.xz
+          tar -xf vulkan-sdk.tar.xz
+          cd $(ls -d 1.* | head -n1)
+          source setup-env.sh
+          echo "VULKAN_SDK=$VULKAN_SDK" >> $GITHUB_ENV
+          echo "PATH=$PATH" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
 
       - name: windows build sqlite-ai
         if: matrix.name == 'windows'
