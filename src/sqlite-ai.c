@@ -271,29 +271,39 @@ struct llama_sampler *llm_sampler_check (ai_context *ai) {
 void *ai_create (sqlite3 *db) {
     ai_context *ai = (ai_context *)sqlite3_malloc(sizeof(ai_context));
     if (ai) {
+        memset(ai, 0, sizeof(ai_context));
         llm_options_init(&ai->options);
         ai->db = db;
     }
     return ai;
 }
 
-static void ai_cleanup (void *ctx) {
+static void ai_free (void *ctx, bool free_ai) {
     if (!ctx) return;
     ai_context *ai = (ai_context *)ctx;
     
     // disable logger first
     ai->db = NULL;
     
-    if (ai->model) llama_model_free(ai->model);
     if (ai->ctx) llama_free(ai->ctx);
+    if (ai->model) llama_model_free(ai->model);
     if (ai->sampler) llama_sampler_free(ai->sampler);
     llm_options_init(&ai->options);
     
     ai->model = NULL;
     ai->ctx = NULL;
     ai->sampler = NULL;
+    
+    if (free_ai) sqlite3_free(ai);
 }
 
+static void ai_cleanup (void *ctx) {
+    ai_free(ctx, false);
+}
+
+static void ai_destroy (void *ctx) {
+    ai_free(ctx, true);
+}
 
 void ai_logger (enum ggml_log_level level, const char *text, void *user_data) {
     ai_context *ai = (ai_context *)user_data;
@@ -1596,7 +1606,7 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     
     // register public functions
     int rc = SQLITE_OK;
-    rc = sqlite3_create_function_v2(db, "ai_version", 0, SQLITE_UTF8, ctx, ai_version, NULL, NULL, ai_cleanup);
+    rc = sqlite3_create_function_v2(db, "ai_version", 0, SQLITE_UTF8, ctx, ai_version, NULL, NULL, ai_destroy);
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function_v2(db, "ai_log_info", 1, SQLITE_UTF8, ctx, ai_log_info, NULL, NULL, NULL);
