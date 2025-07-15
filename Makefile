@@ -27,10 +27,15 @@ MAKEFLAGS += -j$(CPUS)
 # Compiler and flags
 CC = gcc
 CXX = g++
-CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include
-LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_WHISPER)/src -lcommon -lggml -lggml-cpu -lggml-base -lllama -lwhisper
+CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(MINIAUDIO_DIR)
+LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 LLAMA_OPTIONS = $(LLAMA) -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF
 WHISPER_OPTIONS = $(WHISPER) -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF
+
+# Module-specific linking flags
+LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lggml -lggml-cpu -lggml-base -lllama
+WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
+MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
 
 # Directories
 SRC_DIR = src
@@ -39,19 +44,22 @@ VPATH = $(SRC_DIR)
 BUILD_DIR = build
 LLAMA_DIR = modules/llama.cpp
 WHISPER_DIR = modules/whisper.cpp
+MINIAUDIO_DIR = modules/miniaudio
 BUILD_LLAMA = $(BUILD_DIR)/llama.cpp
 BUILD_WHISPER = $(BUILD_DIR)/whisper.cpp
+BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC_FILES)))
 LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/ggml/src/libggml.a $(BUILD_LLAMA)/ggml/src/libggml-base.a $(BUILD_LLAMA)/ggml/src/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
 WHISPER_LIBS = $(BUILD_WHISPER)/src/libwhisper.a
+MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
     TARGET := $(DIST_DIR)/ai.dll
-    LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_WHISPER)/src -l:libllama.a -l:libwhisper.a -l:libcommon.a -l:ggml.a -l:ggml-cpu.a -l:ggml-base.a -fopenmp -static-libgcc -static-libstdc++ -shared
+    LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_WHISPER)/src -L./$(BUILD_MINIAUDIO) -l:libllama.a -l:libwhisper.a -l:libminiaudio.a -l:libcommon.a -l:ggml.a -l:ggml-cpu.a -l:ggml-base.a -fopenmp -static-libgcc -static-libstdc++ -shared
     # Create .def file for Windows
     DEF_FILE := $(BUILD_DIR)/ai.def
     STRIP = strip --strip-unneeded $@
@@ -110,6 +118,8 @@ else # linux
     # using -DGGML_CPU_ALL_VARIANTS=ON
     LDFLAGS := $(filter-out -lggml-cpu,$(LDFLAGS))
     LDFLAGS += -shared -L./$(BUILD_LLAMA)/bin -Wl,-rpath,./$(BUILD_LLAMA)/bin -Wl,-rpath,./$(BUILD_LLAMA)/common -Wl,-rpath,./$(BUILD_LLAMA)/ggml/src -Wl,-rpath,./$(BUILD_LLAMA)/src -Wl,-rpath,./$(BUILD_WHISPER)/src
+    # Add miniaudio Linux-specific flags (as per miniaudio docs)
+    MINIAUDIO_LDFLAGS += -lpthread -lm
     LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=ON -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=ON -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     STRIP = strip --strip-unneeded $@
@@ -131,7 +141,7 @@ extension: $(TARGET)
 all: $(TARGET) 
 
 # Loadable library
-$(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS)
+$(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
 	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
     # Generate import library for Windows
@@ -158,8 +168,14 @@ build/whisper.cpp.stamp:
 	cmake --build $(BUILD_WHISPER) --config Release -- -j$(CPUS)
 	touch $@
 
+build/miniaudio.stamp:
+	cmake -B $(BUILD_MINIAUDIO) -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF $(MINIAUDIO_DIR)
+	cmake --build $(BUILD_MINIAUDIO) --config Release -- -j$(CPUS)
+	touch $@
+
 $(LLAMA_LIBS): build/llama.cpp.stamp
 $(WHISPER_LIBS): build/whisper.cpp.stamp
+$(MINIAUDIO_LIBS): build/miniaudio.stamp
 
 # Tools
 version:
