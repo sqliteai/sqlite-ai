@@ -19,10 +19,6 @@ jobs:
             arch: x86_64
             name: linux-vulkan
             make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
-          - os: LinuxARM64
-            arch: arm64
-            name: linux-vulkan
-            make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
           - os: macos-latest
             name: macos
           - os: windows-latest
@@ -86,6 +82,12 @@ jobs:
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
           echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
 
+      - name: windows install dependencies
+        if: matrix.os == 'windows-latest'
+        run: |
+          pacman -S --noconfirm git
+        shell: msys2 {0}
+
       - name: windows build sqlite-ai
         if: matrix.name == 'windows'
         run: make extension ${{ matrix.make && matrix.make || ''}}
@@ -95,13 +97,13 @@ jobs:
         if: matrix.name != 'windows'
         run: make extension ${{ matrix.make && matrix.make || ''}}
 
-      - name: windows install sqlite3
-        if: matrix.os == 'windows-latest'
-        run: choco install sqlite -y
-
       - name: macos install sqlite3 without SQLITE_OMIT_LOAD_EXTENSION
         if: matrix.name == 'macos'
         run: brew link sqlite --force
+
+      - name: windows install sqlite3
+        if: matrix.os == 'windows-latest'
+        run: choco install -y --no-progress sqlite
 
       - name: android setup test environment
         if: matrix.name == 'android' && matrix.arch != 'arm64-v8a'
