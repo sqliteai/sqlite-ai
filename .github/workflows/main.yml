@@ -63,7 +63,7 @@ jobs:
         if: matrix.name == 'linux-vulkan'
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y build-essential wget git cmake ccache sqlite3 libcurl4-openssl-dev
+          sudo apt-get install -y build-essential wget git cmake sqlite3 libcurl4-openssl-dev
 
       - name: linux install vulkan
         if: matrix.name == 'linux-vulkan'
