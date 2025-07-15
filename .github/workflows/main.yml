@@ -57,7 +57,6 @@ jobs:
           install: >-
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-toolchain
             make
 
       - name: linux install dependencies
