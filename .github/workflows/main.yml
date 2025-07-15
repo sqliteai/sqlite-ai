@@ -57,6 +57,7 @@ jobs:
           install: >-
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-toolchain
             make
 
       - name: linux install dependencies
@@ -85,7 +86,7 @@ jobs:
       - name: windows install dependencies
         if: matrix.os == 'windows-latest'
         run: |
-          pacman -S --noconfirm git
+          pacman -S --noconfirm git sqlite3
         shell: msys2 {0}
 
       - name: windows build sqlite-ai
@@ -101,9 +102,6 @@ jobs:
         if: matrix.name == 'macos'
         run: brew link sqlite --force
 
-      - name: windows install sqlite3
-        if: matrix.os == 'windows-latest'
-        run: choco install -y --no-progress sqlite
 
       - name: android setup test environment
         if: matrix.name == 'android' && matrix.arch != 'arm64-v8a'
@@ -147,8 +145,13 @@ jobs:
             adb push ${{ github.workspace }}/. /data/local/tmp/
             adb shell "sh /data/local/tmp/commands.sh"
 
+      - name: windows test sqlite-ai
+        if: matrix.name == 'windows'
+        run: make test
+        shell: msys2 {0}
+
       - name: test sqlite-ai
-        if: matrix.name == 'linux' || matrix.name == 'windows' || matrix.name == 'macos'
+        if: matrix.name == 'linux' || matrix.name == 'macos'
         run: make test
 
       - uses: actions/upload-artifact@v4.6.2

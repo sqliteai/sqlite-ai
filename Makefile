@@ -28,6 +28,7 @@ MAKEFLAGS += -j$(CPUS)
 CC = gcc
 CXX = g++
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include
+CXXFLAGS = 
 LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_WHISPER)/src -lcommon -lggml -lggml-cpu -lggml-base -lllama -lwhisper
 LLAMA_OPTIONS = $(LLAMA) -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF
 WHISPER_OPTIONS = $(WHISPER) -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF
@@ -55,6 +56,12 @@ ifeq ($(PLATFORM),windows)
     # Create .def file for Windows
     DEF_FILE := $(BUILD_DIR)/ai.def
     STRIP = strip --strip-unneeded $@
+    # Windows-specific C++ flags to work around MinGW codecvt issues
+    # CXXFLAGS += -D_GLIBCXX_USE_CXX11_ABI=1 -DGGML_USE_UNICODE=0 -DLLAMA_DISABLE_UNICODE=1
+    CXXFLAGS += -std=c++17 -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include
+    # Windows-specific flags to work around MinGW codecvt issues
+#     LLAMA_OPTIONS += -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=1 -DGGML_USE_UNICODE=0 -DLLAMA_DISABLE_UNICODE=1"
+#     WHISPER_OPTIONS += -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=1 -DGGML_USE_UNICODE=0"
 else ifeq ($(PLATFORM),macos)
     TARGET := $(DIST_DIR)/ai.dylib
     LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
@@ -132,7 +139,7 @@ all: $(TARGET)
 
 # Loadable library
 $(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS)
-	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
     # Generate import library for Windows
 	dlltool -D $@ -d $(DEF_FILE) -l $(DIST_DIR)/ai.lib
