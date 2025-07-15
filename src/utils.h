@@ -31,7 +31,7 @@ typedef void (*audio_list_devices_callback)(uint32_t count, uint32_t index, cons
 
 bool parse_keyvalue_string (const char *str, keyvalue_callback callback, void *xdata);
 
-bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, int argc, sqlite3_value **argv, int ntypes, int *types, bool check_model);
+bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, int argc, sqlite3_value **argv, int ntypes, int *types, bool check_llm_model, bool check_audio_model);
 int  sqlite_db_write (sqlite3_context *context, sqlite3 *db, const char *sql, const char **values, int types[], int lens[], int count);
 int  sqlite_db_write_simple (sqlite3_context *context, sqlite3 *db, const char *sql);
 bool sqlite_context_result_error (sqlite3_context *context, int rc, const char *format, ...);

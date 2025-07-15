@@ -14,6 +14,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -39,7 +40,7 @@ SQLITE_EXTENSION_INIT3
 #define UUID_LEN                                16
 
 // defined in sqlite-ai.c
-bool ai_model_check (sqlite3_context *context);
+bool ai_model_check (sqlite3_context *context, bool check_llm, bool check_audio);
 
 // MARK: - Memory Wrappers -
 
@@ -264,7 +265,7 @@ void sqlite_common_set_error (sqlite3_context *context, sqlite3_vtab *vtab, int 
     }
 }
 
-bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, int argc, sqlite3_value **argv, int ntypes, int *types, bool check_model) {
+bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, int argc, sqlite3_value **argv, int ntypes, int *types, bool check_llm_model, bool check_audio_model) {
     if (argc != ntypes) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Function '%s' expects %d arguments, but %d were provided.", func_name, ntypes, argc);
         return false;
@@ -278,9 +279,9 @@ bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, in
         }
     }
     
-    if (check_model) {
-        if (ai_model_check(context) == false) {
-            sqlite_context_result_error(context, SQLITE_MISUSE, "No model is currently set. Please call ai_model_load() before using this function.");
+    if (check_llm_model || check_audio_model) {
+        if (ai_model_check(context, check_llm_model, check_audio_model) == false) {
+            sqlite_context_result_error(context, SQLITE_MISUSE, "No model is currently set. Please call llm_model_load() before using this function.");
             return false;
         }
     }

@@ -16,6 +16,7 @@
 
 #include "utils.h"
 #include "llama.h"
+#include "whisper.h"
 #include "sqlite-ai.h"
 
 #include <math.h>
@@ -42,6 +43,7 @@ SQLITE_EXTENSION_INIT1
 #define MAX_PATH                                4096
 #define MAX_TOKEN_TEXT_LEN                      128     // according to ChatGPT 32 would be safe for all common tokenizers
 #define MIN_ALLOC_MESSAGES                      256
+#define MAX_LORAS                               64      // max 2 or 3 LoRa adapters are used (usually just one)
 
 #define LOG_TABLE_DECLARATION                   "CREATE TEMP TABLE ai_log (id INTEGER PRIMARY KEY, stamp DATETIME DEFAULT CURRENT_TIMESTAMP, type TEXT, message TEXT);"
 #define LOG_TABLE_INSERT_STMT                   "INSERT INTO ai_log (type, message) VALUES (?, ?);"
@@ -122,7 +124,13 @@ typedef struct {
     struct llama_model          *model;
     struct llama_context        *ctx;
     struct llama_sampler        *sampler;
+    struct llama_adapter_lora   *lora[MAX_LORAS];
+    float                       lora_scale[MAX_LORAS];
+    
     llm_options                 options;
+    
+    // whisper
+    struct whisper_context      *whisper;
     
     // chat
     struct {
@@ -159,6 +167,23 @@ typedef struct {
     bool                        is_eog;
     sqlite_int64                rowid;
 } ai_cursor;
+
+typedef enum {
+    AI_MODEL_SETTING_N_PARAMS = 1,
+    AI_MODEL_SIZE,
+    AI_MODEL_N_CTX_TRAIN,
+    AI_MODEL_N_EMBED,
+    AI_MODEL_N_LAYER,
+    AI_MODEL_N_HEAD,
+    AI_MODEL_N_HEAD_KV,
+    AI_MODEL_N_SWA,
+    AI_MODEL_FREQ_SCALE_TRAIN,
+    AI_MODEL_N_CLS_OUT,
+    AI_MODEL_HAS_ENCODER,
+    AI_MODEL_HAS_DECODER,
+    AI_MODEL_IS_RECURRENT,
+    AI_MODEL_CHAT_TEMPLATE
+} ai_model_setting;
 
 const char *ROLE_USER       = "user";
 const char *ROLE_ASSISTANT  = "assistant";
@@ -266,6 +291,31 @@ struct llama_sampler *llm_sampler_check (ai_context *ai) {
     return sampler;
 }
 
+static int llm_lora_push (ai_context *ai, struct llama_adapter_lora *lora, float scale) {
+    for (int i=0; i<MAX_LORAS; ++i) {
+        if (ai->lora[i] == NULL) {
+            ai->lora[i] = lora;
+            ai->lora_scale[i] = scale;
+            return i;
+        }
+    }
+    return -1;
+}
+
+// MARK: -
+
+static bool whisper_model_options_callback (void *xdata, const char *key, int key_len, const char *value, int value_len) {
+    struct whisper_context_params *whisper_params = (struct whisper_context_params *)xdata;
+    
+    return true;
+}
+
+static bool whisper_full_params_options_callback (void *xdata, const char *key, int key_len, const char *value, int value_len) {
+    struct whisper_full_params *params = (struct whisper_full_params *)xdata;
+    
+    return true;
+}
+
 // MARK: -
 
 void *ai_create (sqlite3 *db) {
@@ -278,31 +328,47 @@ void *ai_create (sqlite3 *db) {
     return ai;
 }
 
-static void ai_free (void *ctx, bool free_ai) {
+static void ai_free (void *ctx, bool free_ai, bool free_llm, bool free_audio) {
     if (!ctx) return;
     ai_context *ai = (ai_context *)ctx;
     
     // disable logger first
-    ai->db = NULL;
+    if (free_ai) {
+        ai->db = NULL;
+        free_llm = true;
+        free_audio = true;
+    }
     
-    if (ai->ctx) llama_free(ai->ctx);
-    if (ai->model) llama_model_free(ai->model);
-    if (ai->sampler) llama_sampler_free(ai->sampler);
-    llm_options_init(&ai->options);
+    if (free_llm) {
+        memset(ai->lora, 0, sizeof(struct llama_adapter_lora *)*MAX_LORAS);
+        memset(ai->lora_scale, 0, sizeof(float)*MAX_LORAS);
+        llama_clear_adapter_lora(ai->ctx);
+        if (ai->ctx) llama_free(ai->ctx);
+        if (ai->model) llama_model_free(ai->model);
+        if (ai->sampler) llama_sampler_free(ai->sampler);
+        llm_options_init(&ai->options);
+        
+        ai->model = NULL;
+        ai->ctx = NULL;
+        ai->sampler = NULL;
+    }
     
-    ai->model = NULL;
-    ai->ctx = NULL;
-    ai->sampler = NULL;
+    if (free_audio) {
+        if (ai->whisper) whisper_free(ai->whisper);
+        ai->whisper = NULL;
+    }
     
-    if (free_ai) sqlite3_free(ai);
+    if (free_ai) {
+        sqlite3_free(ai);
+    }
 }
 
-static void ai_cleanup (void *ctx) {
-    ai_free(ctx, false);
+static void ai_cleanup (void *ctx, bool free_llm, bool free_audio) {
+    ai_free(ctx, false, free_llm, free_audio);
 }
 
 static void ai_destroy (void *ctx) {
-    ai_free(ctx, true);
+    ai_free(ctx, true, true, true);
 }
 
 void ai_logger (enum ggml_log_level level, const char *text, void *user_data) {
@@ -329,10 +395,12 @@ void ai_logger (enum ggml_log_level level, const char *text, void *user_data) {
     sqlite_db_write(NULL, ai->db, LOG_TABLE_INSERT_STMT, values, types, lens, 2);
 }
 
-bool ai_model_check (sqlite3_context *context) {
+bool ai_model_check (sqlite3_context *context, bool check_llm, bool check_audio) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     if (!ai) return false;
-    return (ai->model != NULL);
+    if (check_llm && (ai->model == NULL)) return false;
+    if (check_audio && (ai->whisper == NULL)) return false;
+    return true;
 }
 
 struct llama_context *ai_context_check (ai_context *ai) {
@@ -350,14 +418,14 @@ struct llama_context *ai_context_check (ai_context *ai) {
     return ctx;
 }
 
-static bool ai_common_args_check (sqlite3_context *context, const char *function_name, int argc, sqlite3_value **argv, bool check_model) {
+static bool llm_common_args_check (sqlite3_context *context, const char *function_name, int argc, sqlite3_value **argv, bool check_llm_model) {
     // sanity check arguments
     if (argc == 1) {
         int types[] = {SQLITE_TEXT};
-        return sqlite_sanity_function(context, function_name, argc, argv, 1, types, check_model);
+        return sqlite_sanity_function(context, function_name, argc, argv, 1, types, check_llm_model, false);
     } else if (argc == 2) {
         int types[] = {SQLITE_TEXT, SQLITE_TEXT};
-        return sqlite_sanity_function(context, function_name, argc, argv, 2, types, check_model);
+        return sqlite_sanity_function(context, function_name, argc, argv, 2, types, check_llm_model, false);
     }
     
     return sqlite_context_result_error(context, SQLITE_ERROR, "Function '%s' expects 1 or 2 arguments, but %d were provided.", function_name, argc);
@@ -545,7 +613,11 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     }
     
     // retrieve embeddings
-    const float *result = llama_get_embeddings(ctx);
+    const float *result = NULL;
+    const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
+    if (pooling_type == LLAMA_POOLING_TYPE_NONE) result = llama_get_embeddings(ctx);
+    else result = llama_get_embeddings_seq(ctx, 0);
+    
     if (result == NULL) {
         sqlite3_free(tokens);
         sqlite3_free(embedding);
@@ -579,7 +651,7 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
 }
 
 static void llm_embed_generate (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    if (ai_common_args_check(context, "llm_embed_generate", argc, argv, true) == false) return;
+    if (llm_common_args_check(context, "llm_embed_generate", argc, argv, true) == false) return;
     
     const char *text = (const char *)sqlite3_value_text(argv[0]);
     int32_t text_len = (int32_t)sqlite3_value_bytes(argv[0]);
@@ -709,7 +781,7 @@ cleanup:
 }
 
 static void llm_text_generate (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    if (ai_common_args_check(context, "llm_text_generate", argc, argv, true) == false) return;
+    if (llm_common_args_check(context, "llm_text_generate", argc, argv, true) == false) return;
     
     const char *text = (const char *)sqlite3_value_text(argv[0]);
     int32_t text_len = (int32_t)sqlite3_value_bytes(argv[0]);
@@ -1205,7 +1277,7 @@ abort_save:
 static void llm_chat_restore (sqlite3_context *context, int argc, sqlite3_value **argv) {
     // sanity check argument
     int types[] = {SQLITE_TEXT};
-    if (sqlite_sanity_function(context, "llm_chat_restore", argc, argv, 1, types, false) == false) return;
+    if (sqlite_sanity_function(context, "llm_chat_restore", argc, argv, 1, types, false, false) == false) return;
     
     // free old chat (if any)
     llm_chat_free(context, 0, NULL);
@@ -1252,7 +1324,7 @@ abort_restore:
 
 static void llm_chat_respond (sqlite3_context *context, int argc, sqlite3_value **argv) {
     int types[] = {SQLITE_TEXT};
-    if (sqlite_sanity_function(context, "llm_chat_respond", argc, argv, 1, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_chat_respond", argc, argv, 1, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     if (llm_chat_check_context(ai) == false) return;
@@ -1278,7 +1350,7 @@ static void llm_sampler_init_greedy (sqlite3_context *context, int argc, sqlite3
 static void llm_sampler_init_dist (sqlite3_context *context, int argc, sqlite3_value **argv) {
     if (argc != 0) {
         int types[] = {SQLITE_INTEGER};
-        if (sqlite_sanity_function(context, "llm_sampler_init_dist", argc, argv, 1, types, true) == false) return;
+        if (sqlite_sanity_function(context, "llm_sampler_init_dist", argc, argv, 1, types, true, false) == false) return;
     }
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
@@ -1293,7 +1365,7 @@ static void llm_sampler_init_top_k (sqlite3_context *context, int argc, sqlite3_
     // Top-K sampling described in academic paper "The Curious Case of Neural Text Degeneration" https://arxiv.org/abs/1904.09751
     
     int types[] = {SQLITE_INTEGER};
-    if (sqlite_sanity_function(context, "llm_sampler_init_top_k", argc, argv, 1, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_top_k", argc, argv, 1, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_sampler_check(ai);
@@ -1307,7 +1379,7 @@ static void llm_sampler_init_top_p (sqlite3_context *context, int argc, sqlite3_
     // Nucleus sampling described in academic paper "The Curious Case of Neural Text Degeneration" https://arxiv.org/abs/1904.09751
     
     int types[] = {SQLITE_FLOAT, SQLITE_INTEGER};
-    if (sqlite_sanity_function(context, "llm_sampler_init_top_p", argc, argv, 2, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_top_p", argc, argv, 2, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_sampler_check(ai);
@@ -1322,7 +1394,7 @@ static void llm_sampler_init_min_p (sqlite3_context *context, int argc, sqlite3_
     // Minimum P sampling as described in https://github.com/ggml-org/llama.cpp/pull/3841
     
     int types[] = {SQLITE_FLOAT, SQLITE_INTEGER};
-    if (sqlite_sanity_function(context, "llm_sampler_init_min_p", argc, argv, 2, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_min_p", argc, argv, 2, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_sampler_check(ai);
@@ -1337,7 +1409,7 @@ static void llm_sampler_init_typical (sqlite3_context *context, int argc, sqlite
     // Locally Typical Sampling implementation described in the paper https://arxiv.org/abs/2202.00666
     
     int types[] = {SQLITE_FLOAT, SQLITE_INTEGER};
-    if (sqlite_sanity_function(context, "llm_sampler_init_typical", argc, argv, 2, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_typical", argc, argv, 2, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_sampler_check(ai);
@@ -1350,7 +1422,7 @@ static void llm_sampler_init_typical (sqlite3_context *context, int argc, sqlite
 
 static void llm_sampler_init_temp (sqlite3_context *context, int argc, sqlite3_value **argv) {
     int types[] = {SQLITE_FLOAT};
-    if (sqlite_sanity_function(context, "llm_sampler_init_temp", argc, argv, 1, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_temp", argc, argv, 1, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_sampler_check(ai);
@@ -1364,7 +1436,7 @@ static void llm_sampler_init_temp_ext (sqlite3_context *context, int argc, sqlit
     // Dynamic temperature implementation (a.k.a. entropy) described in the paper https://arxiv.org/abs/2309.02772
     
     int types[] = {SQLITE_FLOAT, SQLITE_FLOAT, SQLITE_FLOAT};
-    if (sqlite_sanity_function(context, "llm_sampler_init_temp_ext", argc, argv, 3, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_temp_ext", argc, argv, 3, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_sampler_check(ai);
@@ -1380,7 +1452,7 @@ static void llm_sampler_init_xtc (sqlite3_context *context, int argc, sqlite3_va
     // XTC sampler as described in https://github.com/oobabooga/text-generation-webui/pull/6335
     
     int types[] = {SQLITE_FLOAT, SQLITE_FLOAT, SQLITE_INTEGER, SQLITE_INTEGER};
-    if (sqlite_sanity_function(context, "llm_sampler_init_xtc", argc, argv, 4, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_xtc", argc, argv, 4, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_sampler_check(ai);
@@ -1397,7 +1469,7 @@ static void llm_sampler_init_top_n_sigma (sqlite3_context *context, int argc, sq
     // Top n sigma sampling as described in academic paper "Top-nσ: Not All Logits Are You Need" https://arxiv.org/pdf/2411.07641
     
     int types[] = {SQLITE_FLOAT};
-    if (sqlite_sanity_function(context, "llm_sampler_init_top_n_sigma", argc, argv, 1, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_top_n_sigma", argc, argv, 1, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_sampler_check(ai);
@@ -1411,7 +1483,7 @@ static void llm_sampler_init_mirostat (sqlite3_context *context, int argc, sqlit
     // Mirostat 1.0 algorithm described in the paper https://arxiv.org/abs/2007.14966. Uses tokens instead of words.
     
     int types[] = {SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_FLOAT, SQLITE_INTEGER};
-    if (sqlite_sanity_function(context, "llm_sampler_init_mirostat", argc, argv, 4, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_mirostat", argc, argv, 4, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     const struct llama_vocab *vocab = llama_model_get_vocab(ai->model);
@@ -1434,7 +1506,7 @@ static void llm_sampler_init_mirostat_v2 (sqlite3_context *context, int argc, sq
     // Mirostat 2.0 algorithm described in the paper https://arxiv.org/abs/2007.14966. Uses tokens instead of words.
     
     int types[] = {SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_FLOAT};
-    if (sqlite_sanity_function(context, "llm_sampler_init_mirostat_v2", argc, argv, 3, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_mirostat_v2", argc, argv, 3, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_sampler_check(ai);
@@ -1448,7 +1520,7 @@ static void llm_sampler_init_mirostat_v2 (sqlite3_context *context, int argc, sq
 
 static void llm_sampler_init_grammar (sqlite3_context *context, int argc, sqlite3_value **argv) {
     int types[] = {SQLITE_TEXT, SQLITE_TEXT};
-    if (sqlite_sanity_function(context, "llm_sampler_init_grammar", argc, argv, 2, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_grammar", argc, argv, 2, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     const struct llama_vocab *vocab = llama_model_get_vocab(ai->model);
@@ -1481,7 +1553,7 @@ static void llm_sampler_init_infill (sqlite3_context *context, int argc, sqlite3
 
 static void llm_sampler_init_penalties (sqlite3_context *context, int argc, sqlite3_value **argv) {
     int types[] = {SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_FLOAT, SQLITE_FLOAT};
-    if (sqlite_sanity_function(context, "llm_sampler_init_penalties", argc, argv, 4, types, true) == false) return;
+    if (sqlite_sanity_function(context, "llm_sampler_init_penalties", argc, argv, 4, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_sampler_check(ai);
@@ -1495,6 +1567,47 @@ static void llm_sampler_init_penalties (sqlite3_context *context, int argc, sqli
 }
 
 // MARK: - LLM General -
+
+static void llm_lora_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llama_clear_adapter_lora(ai->ctx);
+    for (int i=0; i<MAX_LORAS; ++i) {
+        if (ai->lora[i]) {
+            llama_adapter_lora_free(ai->lora[i]);
+        }
+    }
+}
+
+static void llm_lora_load (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // sanity check arguments
+    int types[] = {SQLITE_TEXT, SQLITE_FLOAT};
+    if (sqlite_sanity_function(context, "llm_lora_load", argc, argv, 2, types, true, false) == false) return;
+    
+    const char *lora_path = (const char *)sqlite3_value_text(argv[0]);
+    float scale = (float)sqlite3_value_double(argv[1]);
+    
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    struct llama_adapter_lora *lora = llama_adapter_lora_init(ai->model, lora_path);
+    if (!lora) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Unable to load LoRA model from file %s", lora_path);
+        return;
+    }
+    
+    int index = llm_lora_push(ai, lora, scale);
+    if (index == -1) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Unable to save LoRA model (%d maximum allowed models reached)", MAX_LORAS);
+        return;
+    }
+    
+    llama_clear_adapter_lora(ai->ctx);
+    for (int i=0; i<MAX_LORAS; ++i) {
+        if (ai->lora[i] && ai->lora_scale[i] != 0.0) {
+            llama_set_adapter_lora(ai->ctx, ai->lora[i], ai->lora_scale[i]);
+        }
+    }
+    
+    sqlite3_result_int(context, index);
+}
 
 static void llm_sampler_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
@@ -1517,7 +1630,7 @@ static void llm_context_free (sqlite3_context *context, int argc, sqlite3_value 
 
 static void llm_context_create (sqlite3_context *context, int argc, sqlite3_value **argv) {
     // sanity check arguments
-    if ((argc > 0) && ai_common_args_check(context, "llm_context_create", argc, argv, true) == false) return;
+    if ((argc > 0) && llm_common_args_check(context, "llm_context_create", argc, argv, true) == false) return;
     const char *options = (argc == 1) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
@@ -1532,15 +1645,12 @@ static void llm_context_create (sqlite3_context *context, int argc, sqlite3_valu
 
 static void llm_model_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (ai->model) llama_model_free(ai->model);
-    if (ai->ctx) llama_free(ai->ctx);
-    ai->model = NULL;
-    ai->ctx = NULL;
+    ai_cleanup((void *)ai, true, false);
 }
 
 static void llm_model_load (sqlite3_context *context, int argc, sqlite3_value **argv) {
     // sanity check arguments
-    if (ai_common_args_check(context, "llm_model_load", argc, argv, false) == false) return;
+    if (llm_common_args_check(context, "llm_model_load", argc, argv, false) == false) return;
     
     const char *model_path = (const char *)sqlite3_value_text(argv[0]);
     const char *model_options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
@@ -1559,11 +1669,258 @@ static void llm_model_load (sqlite3_context *context, int argc, sqlite3_value **
         return;
     }
     
-    ai_cleanup((void *)ai);
+    ai_cleanup((void *)ai, true, false);
     ai->model = model;
 }
 
-// MARK: -
+// MARK: - LLM Model -
+
+static void llm_model_get_setting (sqlite3_context *context, int argc, sqlite3_value **argv, ai_model_setting setting) {
+    // sanity check model
+    if (ai_model_check(context, true, false) == false) {
+        sqlite_context_result_error(context, SQLITE_MISUSE, "No model is currently set. Please call llm_model_load() before using this function.");
+        return;
+    }
+    
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    uint64_t n = 0;
+    
+    switch (setting) {
+        case AI_MODEL_SETTING_N_PARAMS: n = llama_model_n_params(ai->model); break;
+        case AI_MODEL_SIZE: n = llama_model_size(ai->model); break;
+        case AI_MODEL_N_CTX_TRAIN: n = llama_model_n_ctx_train(ai->model); break;
+        case AI_MODEL_N_EMBED: n = llama_model_n_embd(ai->model); break;
+        case AI_MODEL_N_LAYER: n = llama_model_n_layer(ai->model); break;
+        case AI_MODEL_N_HEAD: n = llama_model_n_head(ai->model); break;
+        case AI_MODEL_N_HEAD_KV: n = llama_model_n_head_kv(ai->model); break;
+        case AI_MODEL_N_SWA: n = llama_model_n_swa(ai->model); break;
+        case AI_MODEL_N_CLS_OUT: n = llama_model_n_cls_out(ai->model); break;
+        case AI_MODEL_HAS_ENCODER: n = llama_model_has_encoder(ai->model); break;
+        case AI_MODEL_HAS_DECODER: n = llama_model_has_decoder(ai->model); break;
+        case AI_MODEL_IS_RECURRENT: n = llama_model_is_recurrent(ai->model); break;
+            
+        case AI_MODEL_CHAT_TEMPLATE: {
+            const char *template = llama_model_chat_template(ai->model, NULL);
+            sqlite3_result_text(context, template, -1, SQLITE_STATIC);
+            return;
+        }
+            
+        case AI_MODEL_FREQ_SCALE_TRAIN: {
+            float n = llama_model_rope_freq_scale_train(ai->model);
+            sqlite3_result_double(context, n);
+            return;
+        }
+            
+    }
+    sqlite3_result_int64(context, (sqlite3_int64)n);
+}
+
+static void llm_model_n_params (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Returns the total number of parameters in the model
+    llm_model_get_setting(context, argc, argv, AI_MODEL_SETTING_N_PARAMS);
+}
+
+static void llm_model_size (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Returns the total size of all the tensors in the model in bytes
+    llm_model_get_setting(context, argc, argv, AI_MODEL_SIZE);
+}
+
+static void llm_model_n_ctx_train (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    llm_model_get_setting(context, argc, argv, AI_MODEL_N_CTX_TRAIN);
+}
+
+static void llm_model_n_embd (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    llm_model_get_setting(context, argc, argv, AI_MODEL_N_EMBED);
+}
+
+static void llm_model_n_layer (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Returns the total size of all the tensors in the model in bytes
+    llm_model_get_setting(context, argc, argv, AI_MODEL_N_LAYER);
+}
+
+static void llm_model_n_head (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Returns the total size of all the tensors in the model in bytes
+    llm_model_get_setting(context, argc, argv, AI_MODEL_N_HEAD);
+}
+
+static void llm_model_n_head_kv (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Returns the total size of all the tensors in the model in bytes
+    llm_model_get_setting(context, argc, argv, AI_MODEL_N_HEAD_KV);
+}
+
+static void llm_model_n_swa (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Returns the total size of all the tensors in the model in bytes
+    llm_model_get_setting(context, argc, argv, AI_MODEL_N_SWA);
+}
+
+static void llm_model_rope_freq_scale_train (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Get the model's RoPE frequency scaling factor
+    llm_model_get_setting(context, argc, argv, AI_MODEL_FREQ_SCALE_TRAIN);
+}
+
+static void llm_model_n_cls_out (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Returns the number of classifier outputs (only valid for classifier models)
+    // Undefined behavior for non-classifier models
+    llm_model_get_setting(context, argc, argv, AI_MODEL_N_CLS_OUT);
+}
+
+static void llm_model_cls_label (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Returns label of classifier output by index (<n_cls_out). Returns nullptr if no label provided
+    
+    int types[] = {SQLITE_INTEGER};
+    if (sqlite_sanity_function(context, "llm_model_cls_label", argc, argv, 1, types, true, false) == false) return;
+    
+    int i = sqlite3_value_int(argv[0]);
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    const char *label = llama_model_cls_label(ai->model, i);
+    
+    sqlite3_result_text(context, label, -1, SQLITE_STATIC);
+}
+
+static void llm_model_desc (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Get a string describing the model type
+    
+    if (ai_model_check(context, true, false) == false) {
+        sqlite_context_result_error(context, SQLITE_MISUSE, "No model is currently set. Please call llm_model_load() before using this function.");
+        return;
+    }
+    
+    char buffer[4096];
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    int32_t n = llama_model_desc(ai->model, buffer, sizeof(buffer));
+    (n > 0) ? sqlite3_result_text(context, buffer, n, SQLITE_TRANSIENT) : sqlite3_result_null(context);
+}
+
+static void llm_model_has_encoder (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Returns true if the model contains an encoder that requires llama_encode() call
+    llm_model_get_setting(context, argc, argv, AI_MODEL_HAS_ENCODER);
+}
+
+static void llm_model_has_decoder (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Returns true if the model contains a decoder that requires llama_decode() call
+    llm_model_get_setting(context, argc, argv, AI_MODEL_HAS_DECODER);
+}
+
+static void llm_model_is_recurrent (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Returns true if the model is recurrent (like Mamba, RWKV, etc.)
+    llm_model_get_setting(context, argc, argv, AI_MODEL_IS_RECURRENT);
+}
+
+static void llm_model_chat_template (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // Get the default chat template. Returns nullptr if not available
+    // If name is NULL, returns the default chat template
+    llm_model_get_setting(context, argc, argv, AI_MODEL_CHAT_TEMPLATE);
+}
+
+// MARK: - Audio -
+
+static bool audio_process_check_arguments (sqlite3_context *context, const char *function_name, int argc, sqlite3_value **argv, bool check_audio_model) {
+    // sanity check arguments
+    if (argc == 1) {
+        int type = sqlite3_value_type(argv[0]);
+        if (type != SQLITE_TEXT && type != SQLITE_BLOB) {
+            return sqlite_context_result_error(context, SQLITE_ERROR, "Function '%s' expects the first argument to be TEXT or BLOB.", function_name);
+        }
+        
+        int types[] = {type};
+        return sqlite_sanity_function(context, function_name, argc, argv, 1, types, false, check_audio_model);
+    } else if (argc == 2) {
+        int type = sqlite3_value_type(argv[0]);
+        if (type != SQLITE_TEXT && type != SQLITE_BLOB) {
+            return sqlite_context_result_error(context, SQLITE_ERROR, "Function '%s' expects the first argument to be TEXT or BLOB.", function_name);
+        }
+        
+        int types[] = {type, SQLITE_TEXT};
+        return sqlite_sanity_function(context, function_name, argc, argv, 2, types, false, check_audio_model);
+    }
+    
+    return sqlite_context_result_error(context, SQLITE_ERROR, "Function '%s' expects 1 or 2 arguments, but %d were provided.", function_name, argc);
+}
+
+static void audio_process_run (sqlite3_context *context, const float *buffer, uint64_t num_samples, uint32_t sample_rate, uint16_t channels, const char *options) {
+    struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    if (parse_keyvalue_string(options, whisper_full_params_options_callback, &params) == false) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
+        return;
+    }
+    
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    int rc = whisper_full(ai->whisper, params, buffer, (int)num_samples);
+}
+
+static void audio_process_flac (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (audio_process_check_arguments(context, "audio_process_flac", argc, argv, true) == false) return;
+    
+    float *buffer = NULL;
+    uint64_t num_samples = 0;
+    uint32_t sample_rate = 0;
+    uint16_t channels = 0;
+    
+    if (sqlite3_value_type(argv[0]) == SQLITE_TEXT) {
+        const char *path = (const char *)sqlite3_value_text(argv[0]);
+        buffer = audio_flac_file2pcm(path, &num_samples, &sample_rate, &channels);
+        if (!buffer) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Unable to convert FLAC file %s to PCM.", path);
+            return;
+        }
+    } else {
+        const void *data = sqlite3_value_blob(argv[0]);
+        size_t data_size = (size_t)sqlite3_value_bytes(argv[0]);
+        buffer = audio_flac_mem2pcm(data, data_size, &num_samples, &sample_rate, &channels);
+        if (!buffer) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Unable to convert FLAC blob to PCM.");
+            return;
+        }
+    }
+    
+    const char *options = (argc >= 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
+    audio_process_run(context, buffer, num_samples, sample_rate, channels, options);
+    
+}
+
+static void audio_process_mp3 (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (audio_process_check_arguments(context, "audio_process_mp3", argc, argv, true) == false) return;
+}
+
+static void audio_process_wav (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (audio_process_check_arguments(context, "audio_process_wav", argc, argv, true) == false) return;
+}
+
+static void audio_process (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (audio_process_check_arguments(context, "audio_process", argc, argv, true) == false) return;
+}
+
+static void audio_model_load (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // sanity check arguments
+    if (llm_common_args_check(context, "audio_model_load", argc, argv, false) == false) return;
+    
+    const char *model_path = (const char *)sqlite3_value_text(argv[0]);
+    const char *model_options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
+    
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    struct whisper_context_params ctx_params = whisper_context_default_params();
+    
+    if (parse_keyvalue_string(model_options, whisper_model_options_callback, &ctx_params) == false) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", model_options);
+        return;
+    }
+    
+    struct whisper_context *whisper = whisper_init_from_file_with_params(model_path, ctx_params);
+    if (!whisper) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Unable to load audio model from file %s", model_path);
+        return;
+    }
+    
+    ai_cleanup((void *)ai, false, true);
+    ai->whisper = whisper;
+}
+
+static void audio_model_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    ai_cleanup((void *)ai, false, true);
+}
+
+// MARK: - AI -
 
 static void ai_log_info (sqlite3_context *context, int argc, sqlite3_value **argv) {
     bool info_value = false;
@@ -1612,6 +1969,7 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     rc = sqlite3_create_function_v2(db, "ai_log_info", 1, SQLITE_UTF8, ctx, ai_log_info, NULL, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
+    // LLAMA
     rc = sqlite3_create_function(db, "llm_model_load", 1, SQLITE_UTF8, ctx, llm_model_load, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
@@ -1628,6 +1986,15 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_context_free", 0, SQLITE_UTF8, ctx, llm_context_free, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_context_create", 1, SQLITE_UTF8, ctx, llm_context_create, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_lora_load", 2, SQLITE_UTF8, ctx, llm_lora_load, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_lora_free", 0, SQLITE_UTF8, ctx, llm_lora_free, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_sampler_create", 0, SQLITE_UTF8, ctx, llm_sampler_create, NULL, NULL);
@@ -1696,9 +2063,6 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     rc = sqlite3_create_function(db, "llm_text_generate", 2, SQLITE_UTF8, ctx, llm_text_generate, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
-    rc = sqlite3_create_module(db, "llm_chat", &llm_chat, ctx);
-    if (rc != SQLITE_OK) goto cleanup;
-    
     rc = sqlite3_create_function(db, "llm_chat_create", 0, SQLITE_UTF8, ctx, llm_chat_create, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
@@ -1718,6 +2082,67 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_chat_respond", 1, SQLITE_UTF8, ctx, llm_chat_respond, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_module(db, "llm_chat", &llm_chat, ctx);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_model_n_params", 0, SQLITE_UTF8, ctx, llm_model_n_params, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_size", 0, SQLITE_UTF8, ctx, llm_model_size, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_n_ctx_train", 0, SQLITE_UTF8, ctx, llm_model_n_ctx_train, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_n_embd", 0, SQLITE_UTF8, ctx, llm_model_n_embd, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_n_layer", 0, SQLITE_UTF8, ctx, llm_model_n_layer, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_n_head", 0, SQLITE_UTF8, ctx, llm_model_n_head, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_n_head_kv", 0, SQLITE_UTF8, ctx, llm_model_n_head_kv, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_n_swa", 0, SQLITE_UTF8, ctx, llm_model_n_swa, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_rope_freq_scale_train", 0, SQLITE_UTF8, ctx, llm_model_rope_freq_scale_train, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_n_cls_out", 0, SQLITE_UTF8, ctx, llm_model_n_cls_out, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_cls_label", 0, SQLITE_UTF8, ctx, llm_model_cls_label, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_desc", 0, SQLITE_UTF8, ctx, llm_model_desc, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_has_encoder", 0, SQLITE_UTF8, ctx, llm_model_has_encoder, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_has_decoder", 0, SQLITE_UTF8, ctx, llm_model_has_decoder, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_is_recurrent", 0, SQLITE_UTF8, ctx, llm_model_is_recurrent, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_model_chat_template", 0, SQLITE_UTF8, ctx, llm_model_chat_template, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    // WHISPER
+    rc = sqlite3_create_function(db, "audio_model_load", 1, SQLITE_UTF8, ctx, audio_model_load, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "audio_model_load", 2, SQLITE_UTF8, ctx, audio_model_load, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "audio_model_free", 0, SQLITE_UTF8, ctx, audio_model_free, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
 cleanup:
