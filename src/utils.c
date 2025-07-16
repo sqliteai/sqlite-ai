@@ -14,7 +14,6 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stddef.h>
 
 #ifdef _WIN32
 #include <windows.h>

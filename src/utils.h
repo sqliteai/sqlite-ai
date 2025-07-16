@@ -9,6 +9,7 @@
 #define __SQLITEAI_UTILS__
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 
 #ifndef SQLITE_CORE
