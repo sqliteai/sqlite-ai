@@ -104,7 +104,7 @@ else ifeq ($(PLATFORM),ios)
     LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
     # miniaudio requires -ldl for dlopen() and compile as Objective-C on iOS 
     # https://github.com/mackron/miniaudio/blob/master/README.md#building
-    LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -dynamiclib -ldl $(SDK)
+    LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework Security -dynamiclib -ldl $(SDK)
     CFLAGS += -arch arm64 -x objective-c $(SDK)
     LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
     WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DWHISPER_COREML=ON
