@@ -31,6 +31,7 @@ CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/in
 LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 LLAMA_OPTIONS = $(LLAMA) -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF
 WHISPER_OPTIONS = $(WHISPER) -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF
+MINIAUDIO_OPTIONS = -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
 
 # Module-specific linking flags
 LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lggml -lggml-cpu -lggml-base -lllama
@@ -70,6 +71,7 @@ else ifeq ($(PLATFORM),macos)
     CFLAGS += -arch x86_64 -arch arm64
     LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
     WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
+    MINIAUDIO_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
     STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),android)
     # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
@@ -98,7 +100,7 @@ else ifeq ($(PLATFORM),android)
     STRIP = $(BIN)/llvm-strip --strip-unneeded $@
 else ifeq ($(PLATFORM),ios)
     CC = clang
-    CXX = clang++
+    CXX = $(CC)++
     TARGET := $(DIST_DIR)/ai.dylib
     SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
     LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
@@ -148,7 +150,7 @@ all: $(TARGET)
 compile: $(OBJ_FILES)
 
 # Loadable library
-$(TARGET): compile $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
+$(TARGET): $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
 	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
     # Generate import library for Windows
@@ -164,19 +166,19 @@ $(BUILD_DIR)/%.o: %.c
 test: $(TARGET)
 	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
 
-# Build submodules (only after successful compilation)
-build/llama.cpp.stamp: compile
+# Build submodules (only after successful compilation of the extension)
+build/llama.cpp.stamp: | compile
 	cmake -B $(BUILD_LLAMA) $(LLAMA_OPTIONS) $(LLAMA_DIR)
 	cmake --build $(BUILD_LLAMA) --config Release -- -j$(CPUS)
 	touch $@
 
-build/whisper.cpp.stamp: compile
+build/whisper.cpp.stamp: | compile
 	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
 	cmake --build $(BUILD_WHISPER) --config Release -- -j$(CPUS)
 	touch $@
 
-build/miniaudio.stamp: compile
-	cmake -B $(BUILD_MINIAUDIO) -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF $(MINIAUDIO_DIR)
+build/miniaudio.stamp: | compile
+	cmake -B $(BUILD_MINIAUDIO) $(MINIAUDIO_OPTIONS) $(MINIAUDIO_DIR)
 	cmake --build $(BUILD_MINIAUDIO) --config Release -- -j$(CPUS)
 	touch $@
 
