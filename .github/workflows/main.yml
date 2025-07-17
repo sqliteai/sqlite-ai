@@ -15,24 +15,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # - name: linux-vulkan
-          #   os: ubuntu-latest
-          #   arch: x86_64
-          #   make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
+          - name: linux-vulkan
+            os: ubuntu-latest
+            arch: x86_64
+            make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
           - name: macos
             os: macos-latest
           - name: windows
             os: windows-latest
             arch: x86_64
-          # - name: android
-          #   os: ubuntu-latest
-          #   arch: arm64-v8a
-          #   make: PLATFORM=android ARCH=arm64-v8a
-          # - name: android
-          #   os: ubuntu-latest
-          #   arch: x86_64
-          #   make: PLATFORM=android ARCH=x86_64
-          #   sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
+          - name: android
+            os: ubuntu-latest
+            arch: arm64-v8a
+            make: PLATFORM=android ARCH=arm64-v8a
+          - name: android
+            os: ubuntu-latest
+            arch: x86_64
+            make: PLATFORM=android ARCH=x86_64
+            sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
           # - name: ios
           #   os: macos-latest
           #   make: PLATFORM=ios

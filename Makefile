@@ -74,8 +74,10 @@ else ifeq ($(PLATFORM),macos)
 	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
 	MINIAUDIO_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
-	STRIP = true
+	# Strip removes symbols that are needed for the extension to work properly because loaded via `dlopen()`:
+	# Error: dlopen(./dist/ai.dylib, 0x000A): symbol not found in flat namespace '_whisper_coreml_encode'
 	# STRIP = strip -x -S $@
+	STRIP = true
 else ifeq ($(PLATFORM),android)
 	# Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
 	ifeq ($(filter %,$(ARCH)),)
@@ -100,6 +102,7 @@ else ifeq ($(PLATFORM),android)
 	LDFLAGS += -static-libstdc++ -shared
 	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+	MINIAUDIO_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 	STRIP = $(BIN)/llvm-strip --strip-unneeded $@
 else ifeq ($(PLATFORM),ios)
 	CC = clang
