@@ -61,7 +61,7 @@ MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
-	LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_WHISPER)/src -L./$(BUILD_MINIAUDIO) -l:libllama.a -l:libwhisper.a -l:libminiaudio.a -l:libcommon.a -l:ggml.a -l:ggml-cpu.a -l:ggml-base.a -fopenmp -static-libgcc -static-libstdc++ -shared
+	LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_WHISPER)/src -L./$(BUILD_MINIAUDIO) -l:libllama.a -l:libwhisper.a -l:libminiaudio.a -l:libcommon.a -l:ggml.a -l:ggml-cpu.a -l:ggml-base.a -fopenmp -static-libgcc -static-libstdc++ -shared -lbcrypt
 	# Create .def file for Windows
 	DEF_FILE := $(BUILD_DIR)/ai.def
 	STRIP = strip --strip-unneeded $@

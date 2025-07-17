@@ -21,9 +21,9 @@ jobs:
           #   make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
           - name: macos
             os: macos-latest
-          # - name: windows
-          #   os: windows-latest
-          #   arch: x86_64
+          - name: windows
+            os: windows-latest
+            arch: x86_64
           # - name: android
           #   os: ubuntu-latest
           #   arch: arm64-v8a
@@ -147,15 +147,6 @@ jobs:
         if: matrix.name == 'windows'
         run: make test
         shell: msys2 {0}
-
-      - name: check whisper CoreML linking (macOS)
-        if: matrix.name == 'macos'
-        run: |
-          echo "Checking if whisper CoreML symbols are present..."
-          nm -D dist/ai.dylib | grep -i coreml || echo "CoreML symbols not found in binary"
-          otool -L dist/ai.dylib | grep CoreML || echo "CoreML framework not linked"
-          nm build/whisper.cpp/src/libwhisper.a | grep coreml
-          nm build/whisper.cpp/src/libwhisper.coreml.a | grep coreml
 
       - name: test sqlite-ai
         if: matrix.name == 'linux' || matrix.name == 'macos'
