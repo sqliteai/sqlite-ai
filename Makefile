@@ -110,9 +110,10 @@ else ifeq ($(PLATFORM),ios)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
-	# miniaudio requires -ldl for dlopen() and compile as Objective-C on iOS 
+	# Need to force-load `libwhisper.coreml.a` for CoreML because dinamically loaded on runtime and the compiler strips the symbols
+	LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -Wl,-force_load,$(BUILD_WHISPER)/src/libwhisper.coreml.a -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework Security -dynamiclib $(SDK)
+	# Miniaudio requires to compile as Objective-C on iOS 
 	# https://github.com/mackron/miniaudio/blob/master/README.md#building
-	LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework Security -dynamiclib -ldl $(SDK)
 	CFLAGS += -arch arm64 -x objective-c $(SDK)
 	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
 	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DWHISPER_COREML=ON
@@ -121,8 +122,8 @@ else ifeq ($(PLATFORM),isim)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=14.0
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
-	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -dynamiclib $(SDK)
-	CFLAGS += -arch x86_64 -arch arm64 $(SDK)
+	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -Wl,-force_load,$(BUILD_WHISPER)/src/libwhisper.coreml.a -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework Security -dynamiclib $(SDK)
+	CFLAGS += -arch x86_64 -arch arm64 -x objective-c $(SDK)
 	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
 else # linux

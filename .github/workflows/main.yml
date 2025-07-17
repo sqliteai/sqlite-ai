@@ -33,12 +33,12 @@ jobs:
             arch: x86_64
             make: PLATFORM=android ARCH=x86_64
             sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
-          # - name: ios
-          #   os: macos-latest
-          #   make: PLATFORM=ios
-          # - name: isim
-          #   os: macos-latest
-          #   make: PLATFORM=isim
+          - name: ios
+            os: macos-latest
+            make: PLATFORM=ios
+          - name: isim
+            os: macos-latest
+            make: PLATFORM=isim
 
     defaults:
       run:
