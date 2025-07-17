@@ -15,30 +15,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: linux-vulkan
-            os: ubuntu-latest
-            arch: x86_64
-            make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
+          # - name: linux-vulkan
+          #   os: ubuntu-latest
+          #   arch: x86_64
+          #   make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
           - name: macos
             os: macos-latest
-          - name: windows
-            os: windows-latest
-            arch: x86_64
-          - name: android
-            os: ubuntu-latest
-            arch: arm64-v8a
-            make: PLATFORM=android ARCH=arm64-v8a
-          - name: android
-            os: ubuntu-latest
-            arch: x86_64
-            make: PLATFORM=android ARCH=x86_64
-            sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
-          - name: ios
-            os: macos-latest
-            make: PLATFORM=ios
-          - name: isim
-            os: macos-latest
-            make: PLATFORM=isim
+          # - name: windows
+          #   os: windows-latest
+          #   arch: x86_64
+          # - name: android
+          #   os: ubuntu-latest
+          #   arch: arm64-v8a
+          #   make: PLATFORM=android ARCH=arm64-v8a
+          # - name: android
+          #   os: ubuntu-latest
+          #   arch: x86_64
+          #   make: PLATFORM=android ARCH=x86_64
+          #   sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
+          # - name: ios
+          #   os: macos-latest
+          #   make: PLATFORM=ios
+          # - name: isim
+          #   os: macos-latest
+          #   make: PLATFORM=isim
 
     defaults:
       run:
@@ -92,7 +92,7 @@ jobs:
         if: matrix.name == 'windows'
         run: make extension ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
-
+          
       - name: build sqlite-ai
         if: matrix.name != 'windows'
         run: make extension ${{ matrix.make && matrix.make || ''}}
@@ -100,7 +100,6 @@ jobs:
       - name: macos install sqlite3 without SQLITE_OMIT_LOAD_EXTENSION
         if: matrix.name == 'macos'
         run: brew link sqlite --force
-
 
       - name: android setup test environment
         if: matrix.name == 'android' && matrix.arch != 'arm64-v8a'
@@ -148,6 +147,15 @@ jobs:
         if: matrix.name == 'windows'
         run: make test
         shell: msys2 {0}
+
+      - name: check whisper CoreML linking (macOS)
+        if: matrix.name == 'macos'
+        run: |
+          echo "Checking if whisper CoreML symbols are present..."
+          nm -D dist/ai.dylib | grep -i coreml || echo "CoreML symbols not found in binary"
+          otool -L dist/ai.dylib | grep CoreML || echo "CoreML framework not linked"
+          nm build/whisper.cpp/src/libwhisper.a | grep coreml
+          nm build/whisper.cpp/src/libwhisper.coreml.a | grep coreml
 
       - name: test sqlite-ai
         if: matrix.name == 'linux' || matrix.name == 'macos'

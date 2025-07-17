@@ -24,20 +24,6 @@ endif
 # Speed up builds by using all available CPU cores
 MAKEFLAGS += -j$(CPUS)
 
-# Compiler and flags
-CC = gcc
-CXX = g++
-CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
-LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
-LLAMA_OPTIONS = $(LLAMA) -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF
-WHISPER_OPTIONS = $(WHISPER) -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF
-MINIAUDIO_OPTIONS = -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
-
-# Module-specific linking flags
-LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lggml -lggml-cpu -lggml-base -lllama
-WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
-MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
-
 # Directories
 SRC_DIR = src
 DIST_DIR = dist
@@ -49,6 +35,21 @@ MINIAUDIO_DIR = modules/miniaudio
 BUILD_LLAMA = $(BUILD_DIR)/llama.cpp
 BUILD_WHISPER = $(BUILD_DIR)/whisper.cpp
 BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
+
+# Compiler and flags
+CC = gcc
+CXX = g++
+CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
+LLAMA_OPTIONS = -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF
+WHISPER_OPTIONS = -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF
+MINIAUDIO_OPTIONS = -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
+
+# Module-specific linking flags
+LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lggml -lggml-cpu -lggml-base -lllama
+WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
+MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
+
+LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
@@ -67,12 +68,14 @@ ifeq ($(PLATFORM),windows)
 else ifeq ($(PLATFORM),macos)
     TARGET := $(DIST_DIR)/ai.dylib
     LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
-    LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -framework CoreML -dynamiclib -undefined dynamic_lookup
+    WHISPER_LIBS += $(BUILD_WHISPER)/src/libwhisper.coreml.a
+    LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -Wl,-force_load,$(BUILD_WHISPER)/src/libwhisper.coreml.a -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -framework CoreML -dynamiclib -undefined dynamic_lookup
     CFLAGS += -arch x86_64 -arch arm64
     LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
     WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
     MINIAUDIO_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
-    STRIP = strip -x -S $@
+    STRIP = true
+    # STRIP = strip -x -S $@  # Disabled for debugging symbol issues
 else ifeq ($(PLATFORM),android)
     # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
     ifeq ($(filter %,$(ARCH)),)
@@ -134,9 +137,9 @@ endif
 # Windows .def file generation
 $(DEF_FILE):
 ifeq ($(PLATFORM),windows)
-	@echo "LIBRARY ai.dll" > $@
-	@echo "EXPORTS" >> $@
-	@echo "    sqlite3_ai_init" >> $@
+    @echo "LIBRARY ai.dll" > $@
+    @echo "EXPORTS" >> $@
+    @echo "    sqlite3_ai_init" >> $@
 endif
 
 # Make sure the build and dist directories exist
@@ -151,36 +154,36 @@ compile: $(OBJ_FILES)
 
 # Loadable library
 $(TARGET): $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
-	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
+    $(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
     # Generate import library for Windows
-	dlltool -D $@ -d $(DEF_FILE) -l $(DIST_DIR)/ai.lib
+    dlltool -D $@ -d $(DEF_FILE) -l $(DIST_DIR)/ai.lib
 endif
     # Strip debug symbols
-	$(STRIP)
+    $(STRIP)
 
 # Object files
 $(BUILD_DIR)/%.o: %.c
-	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
+    $(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
 
 test: $(TARGET)
-	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
+    $(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
 
 # Build submodules (only after successful compilation of the extension)
 build/llama.cpp.stamp: | compile
-	cmake -B $(BUILD_LLAMA) $(LLAMA_OPTIONS) $(LLAMA_DIR)
-	cmake --build $(BUILD_LLAMA) --config Release -- -j$(CPUS)
-	touch $@
+    cmake -B $(BUILD_LLAMA) $(LLAMA_OPTIONS) $(LLAMA_DIR)
+    cmake --build $(BUILD_LLAMA) --config Release -- -j$(CPUS)
+    touch $@
 
 build/whisper.cpp.stamp: | compile
-	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
-	cmake --build $(BUILD_WHISPER) --config Release -- -j$(CPUS)
-	touch $@
+    cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
+    cmake --build $(BUILD_WHISPER) --config Release -- -j$(CPUS)
+    touch $@
 
 build/miniaudio.stamp: | compile
-	cmake -B $(BUILD_MINIAUDIO) $(MINIAUDIO_OPTIONS) $(MINIAUDIO_DIR)
-	cmake --build $(BUILD_MINIAUDIO) --config Release -- -j$(CPUS)
-	touch $@
+    cmake -B $(BUILD_MINIAUDIO) $(MINIAUDIO_OPTIONS) $(MINIAUDIO_DIR)
+    cmake --build $(BUILD_MINIAUDIO) --config Release -- -j$(CPUS)
+    touch $@
 
 $(LLAMA_LIBS): build/llama.cpp.stamp
 $(WHISPER_LIBS): build/whisper.cpp.stamp
@@ -188,30 +191,30 @@ $(MINIAUDIO_LIBS): build/miniaudio.stamp
 
 # Tools
 version:
-	@echo $(shell sed -n 's/^#define SQLITE_AI_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' src/sqlite-ai.h)
+    @echo $(shell sed -n 's/^#define SQLITE_AI_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' src/sqlite-ai.h)
 
 # Clean up generated files
 clean:
-	rm -rf $(BUILD_DIR)/* $(DIST_DIR)/* *.gcda *.gcno *.gcov *.sqlite
+    rm -rf $(BUILD_DIR)/* $(DIST_DIR)/* *.gcda *.gcno *.gcov *.sqlite
 
 # Help message
 help:
-	@echo "SQLite AI Extension Makefile"
-	@echo "Usage:"
-	@echo "  make [PLATFORM=platform] [ARCH=arch] [ANDROID_NDK=\$$ANDROID_HOME/ndk/26.1.10909125] [target]"
-	@echo ""
-	@echo "Platforms:"
-	@echo "  linux (default on Linux)"
-	@echo "  macos (default on macOS)"
-	@echo "  windows (default on Windows)"
-	@echo "  android (needs ARCH to be set to x86_64 or arm64-v8a and ANDROID_NDK to be set)"
-	@echo "  ios (only on macOS)"
-	@echo "  isim (only on macOS)"
-	@echo ""
-	@echo "Targets:"
-	@echo "  all					- Build the extension (default)"
-	@echo "  clean					- Remove built files"
-	@echo "  test					- Test the extension"
-	@echo "  help					- Display this help message"
+    @echo "SQLite AI Extension Makefile"
+    @echo "Usage:"
+    @echo "  make [PLATFORM=platform] [ARCH=arch] [ANDROID_NDK=\$$ANDROID_HOME/ndk/26.1.10909125] [target]"
+    @echo ""
+    @echo "Platforms:"
+    @echo "  linux (default on Linux)"
+    @echo "  macos (default on macOS)"
+    @echo "  windows (default on Windows)"
+    @echo "  android (needs ARCH to be set to x86_64 or arm64-v8a and ANDROID_NDK to be set)"
+    @echo "  ios (only on macOS)"
+    @echo "  isim (only on macOS)"
+    @echo ""
+    @echo "Targets:"
+    @echo "  all					- Build the extension (default)"
+    @echo "  clean					- Remove built files"
+    @echo "  test					- Test the extension"
+    @echo "  help					- Display this help message"
 
 .PHONY: all clean test extension help compile
