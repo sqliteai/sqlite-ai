@@ -342,7 +342,7 @@ static void ai_free (void *ctx, bool free_ai, bool free_llm, bool free_audio) {
     if (free_llm) {
         memset(ai->lora, 0, sizeof(struct llama_adapter_lora *)*MAX_LORAS);
         memset(ai->lora_scale, 0, sizeof(float)*MAX_LORAS);
-        llama_clear_adapter_lora(ai->ctx);
+        if (ai->ctx) llama_clear_adapter_lora(ai->ctx);
         if (ai->ctx) llama_free(ai->ctx);
         if (ai->model) llama_model_free(ai->model);
         if (ai->sampler) llama_sampler_free(ai->sampler);
