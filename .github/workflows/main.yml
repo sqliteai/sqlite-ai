@@ -15,30 +15,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: linux-vulkan
-            os: ubuntu-latest
-            arch: x86_64
-            make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
-          - name: macos
-            os: macos-latest
+          # - name: linux-vulkan
+          #   os: ubuntu-latest
+          #   arch: x86_64
+          #   make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
+          # - name: macos
+          #   os: macos-latest
           - name: windows
             os: windows-latest
             arch: x86_64
-          - name: android
-            os: ubuntu-latest
-            arch: arm64-v8a
-            make: PLATFORM=android ARCH=arm64-v8a
-          - name: android
-            os: ubuntu-latest
+          - name: windows-cuda
+            os: windows-latest
             arch: x86_64
-            make: PLATFORM=android ARCH=x86_64
-            sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
-          - name: ios
-            os: macos-latest
-            make: PLATFORM=ios
-          - name: isim
-            os: macos-latest
-            make: PLATFORM=isim
+            make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON"
+          # - name: android
+          #   os: ubuntu-latest
+          #   arch: arm64-v8a
+          #   make: PLATFORM=android ARCH=arm64-v8a
+          # - name: android
+          #   os: ubuntu-latest
+          #   arch: x86_64
+          #   make: PLATFORM=android ARCH=x86_64
+          #   sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
+          # - name: ios
+          #   os: macos-latest
+          #   make: PLATFORM=ios
+          # - name: isim
+          #   os: macos-latest
+          #   make: PLATFORM=isim
 
     defaults:
       run:
@@ -49,15 +53,6 @@ jobs:
       - uses: actions/checkout@v4.2.2
         with:
           submodules: true
-
-      - uses: msys2/setup-msys2@v2.27.0
-        if: matrix.os == 'windows-latest'
-        with:
-          msystem: mingw64
-          install: >-
-            mingw-w64-x86_64-cc
-            mingw-w64-x86_64-cmake
-            make
 
       - name: linux install dependencies
         if: matrix.name == 'linux-vulkan'
@@ -82,17 +77,24 @@ jobs:
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
           echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
 
-      - name: windows install dependencies
-        if: matrix.os == 'windows-latest'
-        run: |
-          pacman -S --noconfirm git sqlite3
-        shell: msys2 {0}
 
-      - name: windows build sqlite-ai
-        if: matrix.name == 'windows'
-        run: make extension ${{ matrix.make && matrix.make || ''}}
-        shell: msys2 {0}
-          
+      - name: Install CUDA Toolkit
+        if: matrix.name == 'windows-cuda'
+        run: |
+          choco install cuda -y --no-progress
+        shell: powershell
+
+      - name: Setup MSBuild
+        if: matrix.name == 'windows' || matrix.name == 'windows-cuda'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Windows build sqlite-ai
+        if: matrix.name == 'windows' || matrix.name == 'windows-cuda'
+        shell: cmd
+        run: |
+          call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat"
+          nmake /f Makefile PLATFORM=windows ${{ matrix.make && matrix.make || ''}}
+      
       - name: build sqlite-ai
         if: matrix.name != 'windows'
         run: make extension ${{ matrix.make && matrix.make || ''}}
@@ -143,10 +145,13 @@ jobs:
             adb push ${{ github.workspace }}/. /data/local/tmp/
             adb shell "sh /data/local/tmp/commands.sh"
 
+
       - name: windows test sqlite-ai
-        if: matrix.name == 'windows'
-        run: make test
-        shell: msys2 {0}
+        if: matrix.os == 'windows-latest'
+        run: |
+          call "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          nmake /f Makefile test PLATFORM=windows
+        shell: cmd
 
       - name: test sqlite-ai
         if: matrix.name == 'linux' || matrix.name == 'macos'

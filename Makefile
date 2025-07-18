@@ -36,6 +36,7 @@ BUILD_LLAMA = $(BUILD_DIR)/llama.cpp
 BUILD_WHISPER = $(BUILD_DIR)/whisper.cpp
 BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 
+OBJ_EXT = o
 # Compiler and flags
 CC = gcc
 CXX = g++
@@ -53,18 +54,21 @@ LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
-OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC_FILES)))
+OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.$(OBJ_EXT), $(notdir $(SRC_FILES)))
 LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/ggml/src/libggml.a $(BUILD_LLAMA)/ggml/src/libggml-base.a $(BUILD_LLAMA)/ggml/src/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
 WHISPER_LIBS = $(BUILD_WHISPER)/src/libwhisper.a
 MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
+	OBJ_EXT = obj
+	CC = cl
+	CXX = cl
 	TARGET := $(DIST_DIR)/ai.dll
-	LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_WHISPER)/src -L./$(BUILD_MINIAUDIO) -l:libllama.a -l:libwhisper.a -l:libminiaudio.a -l:libcommon.a -l:ggml.a -l:ggml-cpu.a -l:ggml-base.a -fopenmp -static-libgcc -static-libstdc++ -shared -lbcrypt
-	# Create .def file for Windows
+	CFLAGS = /nologo /W3 /EHsc /I$(SRC_DIR) /I$(LLAMA_DIR)/ggml/include /I$(LLAMA_DIR)/include /I$(WHISPER_DIR)/include /I$(MINIAUDIO_DIR) /MD
+	LDFLAGS = /DLL /OUT:$(TARGET) /LIBPATH:$(BUILD_LLAMA)/common /LIBPATH:$(BUILD_LLAMA)/ggml/src /LIBPATH:$(BUILD_LLAMA)/src /LIBPATH:$(BUILD_WHISPER)/src /LIBPATH:$(BUILD_MINIAUDIO) common.lib ggml.lib ggml-cpu.lib ggml-base.lib llama.lib whisper.lib miniaudio.lib bcrypt.lib
 	DEF_FILE := $(BUILD_DIR)/ai.def
-	STRIP = strip --strip-unneeded $@
+	STRIP = echo "No strip needed for MSVC"
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
@@ -128,7 +132,7 @@ else ifeq ($(PLATFORM),isim)
 	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
 else # linux
 	TARGET := $(DIST_DIR)/ai.so
-	# using -DGGML_CPU_ALL_VARIANTS=ON
+	# Using -DGGML_CPU_ALL_VARIANTS=ON, `-lggml-cpu` is not needed
 	LDFLAGS := $(filter-out -lggml-cpu,$(LDFLAGS))
 	LDFLAGS += -shared -L./$(BUILD_LLAMA)/bin -Wl,-rpath,./$(BUILD_LLAMA)/bin -Wl,-rpath,./$(BUILD_LLAMA)/common -Wl,-rpath,./$(BUILD_LLAMA)/ggml/src -Wl,-rpath,./$(BUILD_LLAMA)/src -Wl,-rpath,./$(BUILD_WHISPER)/src
 	# Add miniaudio Linux-specific flags (as per miniaudio docs)
@@ -158,17 +162,21 @@ compile: $(OBJ_FILES)
 
 # Loadable library
 $(TARGET): $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
-	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
-	# Generate import library for Windows
-	dlltool -D $@ -d $(DEF_FILE) -l $(DIST_DIR)/ai.lib
+	$(CXX) $(OBJ_FILES) /link $(LDFLAGS)
+else
+	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 endif
-	# Strip debug symbols
 	$(STRIP)
 
 # Object files
+ifeq ($(PLATFORM),windows)
+$(BUILD_DIR)/%.obj: %.c
+	$(CC) $(CFLAGS) /c $< /Fo$@
+else
 $(BUILD_DIR)/%.o: %.c
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
+endif
 
 test: $(TARGET)
 	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
