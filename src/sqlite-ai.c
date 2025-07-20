@@ -345,7 +345,8 @@ static void ai_free (void *ctx, bool free_ai, bool free_llm, bool free_audio) {
         if (ai->ctx) llama_clear_adapter_lora(ai->ctx);
         if (ai->ctx) llama_free(ai->ctx);
         if (ai->model) llama_model_free(ai->model);
-        if (ai->sampler) llama_sampler_free(ai->sampler);
+        // important: do not free if the sampler has been added to a llama_sampler_chain (via llama_sampler_chain_add)
+        // if (ai->sampler) llama_sampler_free(ai->sampler);
         llm_options_init(&ai->options);
         
         ai->model = NULL;
