@@ -2,8 +2,6 @@
 
 **SQLite-AI** is an extension for SQLite that brings artificial intelligence capabilities directly into the database. It enables developers to run, fine-tune, and serve AI models from within SQLite using simple SQL queries — ideal for on-device and edge applications where low-latency and offline inference are critical. The extension is actively developed by [SQLite AI](https://sqlite.ai), some API and features are still evolving.
 
----
-
 ## Features
 
 * **Embedded AI Inference**: Run transformer models directly from SQL queries.
