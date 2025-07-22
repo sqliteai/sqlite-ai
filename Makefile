@@ -144,6 +144,15 @@ endif
 ifneq (,$(findstring BLAS,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
 	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas
+	# Link against specific BLAS implementations
+	ifneq (,$(findstring OpenBLAS,$(LLAMA)))
+		LLAMA_LDFLAGS += -lopenblas
+	else ifneq (,$(findstring Apple,$(LLAMA)))
+		# Apple Accelerate is already linked in macOS section
+	else
+		# Generic BLAS
+		LLAMA_LDFLAGS += -lblas
+	endif
 endif
 ifneq (,$(findstring COREML,$(WHISPER))) # CoreML - only macos
 	WHISPER_LIBS += $(BUILD_WHISPER)/src/libwhisper.coreml.a
