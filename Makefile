@@ -224,7 +224,7 @@ clean:
 help:
 	@echo "SQLite AI Extension Makefile"
 	@echo "Usage:"
-	@echo "  make [PLATFORM=platform] [ARCH=arch] [ANDROID_NDK=\$$ANDROID_HOME/ndk/26.1.10909125] [target]"
+	@echo "  make [PLATFORM=platform] [ARCH=arch] [ANDROID_NDK=\$$ANDROID_HOME/ndk/26.1.10909125] [target] [LLAMA=options] [WHISPER=options] [MINIAUDIO=options]"
 	@echo ""
 	@echo "Platforms:"
 	@echo "  linux (default on Linux)"
