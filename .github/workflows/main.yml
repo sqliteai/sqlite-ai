@@ -15,15 +15,61 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux CPU builds
+          - os: ubuntu-latest
+            arch: x86_64
+            name: linux-cpu
+            make: LLAMA="-DGGML_NATIVE=ON"
+          - os: ubuntu-latest
+            arch: x86_64
+            name: linux-cpu-avx2
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
+          - os: ubuntu-latest
+            arch: x86_64
+            name: linux-cpu-avx512
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX512=ON -DGGML_AVX512_VNNI=ON"
+          
+          # Linux BLAS builds
+          - os: ubuntu-latest
+            arch: x86_64
+            name: linux-openblas
+            make: LLAMA="-DGGML_NATIVE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
+          
+          # Linux GPU builds
           - os: ubuntu-latest
             arch: x86_64
             name: linux-vulkan
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
+          - os: ubuntu-latest
+            arch: x86_64
+            name: linux-opencl
+            make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
+          
+          # macOS builds
           - os: macos-latest
-            name: macos
+            name: macos-cpu
+            make: LLAMA="-DGGML_NATIVE=ON"
+          - os: macos-latest
+            name: macos-metal
+            make: LLAMA="-DGGML_NATIVE=ON -DGGML_METAL=ON" WHISPER="-DGGML_METAL=ON"
+          - os: macos-latest
+            name: macos-accelerate
+            make: LLAMA="-DGGML_NATIVE=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple"
+          - os: macos-latest
+            name: macos-coreml
+            make: WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+          
+          # Windows builds (commented out but ready to enable)
           # - os: windows-latest
           #   arch: x86_64
-          #   name: windows
+          #   name: windows-cpu
+          #   make: LLAMA="-DGGML_NATIVE=ON"
+          # - os: windows-latest
+          #   arch: x86_64
+          #   name: windows-vulkan
+          #   make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
+          
+          # Android builds
           - os: ubuntu-latest
             arch: arm64-v8a
             name: android
@@ -33,6 +79,8 @@ jobs:
             name: android
             make: PLATFORM=android ARCH=x86_64
             sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
+          
+          # iOS builds
           - os: macos-latest
             name: ios
             make: PLATFORM=ios
@@ -58,6 +106,22 @@ jobs:
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
             make
+
+      - name: linux install dependencies
+        if: startsWith(matrix.name, 'linux-')
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential wget git cmake sqlite3 libcurl4-openssl-dev
+          
+      - name: linux install openblas
+        if: matrix.name == 'linux-openblas'
+        run: |
+          sudo apt-get install -y libopenblas-dev
+          
+      - name: linux install opencl
+        if: matrix.name == 'linux-opencl'
+        run: |
+          sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
 
       - name: linux install vulkan
         if: matrix.name == 'linux-vulkan'
@@ -90,7 +154,7 @@ jobs:
         run: choco install sqlite -y
 
       - name: macos install sqlite3 without SQLITE_OMIT_LOAD_EXTENSION
-        if: matrix.name == 'macos'
+        if: startsWith(matrix.name, 'macos-')
         run: brew link sqlite --force
 
       - name: android setup test environment
@@ -136,7 +200,7 @@ jobs:
             adb shell "sh /data/local/tmp/commands.sh"
 
       - name: test sqlite-ai
-        if: contains(matrix.name, 'linux') || contains(matrix.name, 'windows') || contains(matrix.name, 'macos')
+        if: startsWith(matrix.name, 'linux-') || startsWith(matrix.name, 'windows-') || startsWith(matrix.name, 'macos-')
         run: make test
 
       - uses: actions/upload-artifact@v4.6.2

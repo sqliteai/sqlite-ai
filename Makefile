@@ -139,6 +139,14 @@ ifneq (,$(findstring VULKAN,$(LLAMA)))
 		LLAMA_LDFLAGS += -ldl
 	endif
 endif
+ifneq (,$(findstring OPENCL,$(LLAMA)))
+	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-opencl/libggml-opencl.a
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl -lggml-opencl -lOpenCL
+endif
+ifneq (,$(findstring BLAS,$(LLAMA)))
+	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas
+endif
 
 # Windows .def file generation
 $(DEF_FILE):
