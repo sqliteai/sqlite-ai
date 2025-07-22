@@ -136,7 +136,7 @@ jobs:
             adb shell "sh /data/local/tmp/commands.sh"
 
       - name: test sqlite-ai
-        if: matrix.name == 'linux' || matrix.name == 'windows' || matrix.name == 'macos'
+        if: contains(matrix.name, 'linux') || contains(matrix.name, 'windows') || contains(matrix.name, 'macos')
         run: make test
 
       - uses: actions/upload-artifact@v4.6.2
