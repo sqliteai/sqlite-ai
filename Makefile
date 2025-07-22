@@ -36,52 +36,44 @@ BUILD_LLAMA = $(BUILD_DIR)/llama.cpp
 BUILD_WHISPER = $(BUILD_DIR)/whisper.cpp
 BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 
-OBJ_EXT = o
 # Compiler and flags
 CC = gcc
 CXX = g++
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
-LLAMA_OPTIONS = -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF
-WHISPER_OPTIONS = -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF
-MINIAUDIO_OPTIONS = -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
-
-# Module-specific linking flags
-LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lggml -lggml-cpu -lggml-base -lllama
+LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF
+WHISPER_OPTIONS = $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF
+MINIAUDIO_OPTIONS = $(MINIAUDIO) -DBUILD_SHARED_LIBS=OFF -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
+# Module-specific linker flags
+LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lggml -lggml-base -lggml-cpu -lllama
 WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
 MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
-
 LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
-OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.$(OBJ_EXT), $(notdir $(SRC_FILES)))
+OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC_FILES)))
 LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/ggml/src/libggml.a $(BUILD_LLAMA)/ggml/src/libggml-base.a $(BUILD_LLAMA)/ggml/src/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
 WHISPER_LIBS = $(BUILD_WHISPER)/src/libwhisper.a
 MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
-	OBJ_EXT = obj
-	CC = cl
-	CXX = cl
 	TARGET := $(DIST_DIR)/ai.dll
-	CFLAGS = /nologo /W3 /EHsc /I$(SRC_DIR) /I$(LLAMA_DIR)/ggml/include /I$(LLAMA_DIR)/include /I$(WHISPER_DIR)/include /I$(MINIAUDIO_DIR) /MD
-	LDFLAGS = /DLL /OUT:$(TARGET) /LIBPATH:$(BUILD_LLAMA)/common /LIBPATH:$(BUILD_LLAMA)/ggml/src /LIBPATH:$(BUILD_LLAMA)/src /LIBPATH:$(BUILD_WHISPER)/src /LIBPATH:$(BUILD_MINIAUDIO) common.lib ggml.lib ggml-cpu.lib ggml-base.lib llama.lib whisper.lib miniaudio.lib bcrypt.lib
+	LDFLAGS += -shared
+	# Create .def file for Windows
 	DEF_FILE := $(BUILD_DIR)/ai.def
-	STRIP = echo "No strip needed for MSVC"
+	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
 	WHISPER_LIBS += $(BUILD_WHISPER)/src/libwhisper.coreml.a
-	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -Wl,-force_load,$(BUILD_WHISPER)/src/libwhisper.coreml.a -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -framework CoreML -dynamiclib -undefined dynamic_lookup
+	WHISPER_LDFLAGS += -lwhisper.coreml
+	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -framework CoreML -dynamiclib -undefined dynamic_lookup
 	CFLAGS += -arch x86_64 -arch arm64
-	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
-	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
-	MINIAUDIO_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
-	# Strip removes symbols that are needed for the extension to work properly because loaded via `dlopen()`:
-	# Error: dlopen(./dist/ai.dylib, 0x000A): symbol not found in flat namespace '_whisper_coreml_encode'
-	# STRIP = strip -x -S $@
-	STRIP = true
+	LLAMA_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+	WHISPER_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
+	MINIAUDIO_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+	STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),android)
 	# Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
 	ifeq ($(filter %,$(ARCH)),)
@@ -104,41 +96,35 @@ else ifeq ($(PLATFORM),android)
 	CXX = $(CC)++
 	TARGET := $(DIST_DIR)/ai.so
 	LDFLAGS += -static-libstdc++ -shared
-	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-	MINIAUDIO_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+	LLAMA_OPTIONS += -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+	WHISPER_OPTIONS += -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+	MINIAUDIO_OPTIONS += -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 	STRIP = $(BIN)/llvm-strip --strip-unneeded $@
 else ifeq ($(PLATFORM),ios)
-	CC = clang
-	CXX = $(CC)++
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
-	# Need to force-load `libwhisper.coreml.a` for CoreML because dinamically loaded on runtime and the compiler strips the symbols
-	LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -Wl,-force_load,$(BUILD_WHISPER)/src/libwhisper.coreml.a -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework Security -dynamiclib $(SDK)
-	# Miniaudio requires to compile as Objective-C on iOS 
-	# https://github.com/mackron/miniaudio/blob/master/README.md#building
+	WHISPER_LDFLAGS += -lwhisper.coreml
+	LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -ldl -dynamiclib $(SDK)
 	CFLAGS += -arch arm64 -x objective-c $(SDK)
-	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
-	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DWHISPER_COREML=ON
+	LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+	WHISPER_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DWHISPER_COREML=ON
 	STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),isim)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=14.0
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
-	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -Wl,-force_load,$(BUILD_WHISPER)/src/libwhisper.coreml.a -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework Security -dynamiclib $(SDK)
+	WHISPER_LDFLAGS += -lwhisper.coreml
+	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -ldl -dynamiclib $(SDK)
 	CFLAGS += -arch x86_64 -arch arm64 -x objective-c $(SDK)
-	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
-	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
+	LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+	WHISPER_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
 else # linux
 	TARGET := $(DIST_DIR)/ai.so
-	# Using -DGGML_CPU_ALL_VARIANTS=ON, `-lggml-cpu` is not needed
-	LDFLAGS := $(filter-out -lggml-cpu,$(LDFLAGS))
-	LDFLAGS += -shared -L./$(BUILD_LLAMA)/bin -Wl,-rpath,./$(BUILD_LLAMA)/bin -Wl,-rpath,./$(BUILD_LLAMA)/common -Wl,-rpath,./$(BUILD_LLAMA)/ggml/src -Wl,-rpath,./$(BUILD_LLAMA)/src -Wl,-rpath,./$(BUILD_WHISPER)/src
-	# Add miniaudio Linux-specific flags (as per miniaudio docs)
+	LDFLAGS += -shared
 	MINIAUDIO_LDFLAGS += -lpthread -lm
-	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=ON -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=ON -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+	LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 	STRIP = strip --strip-unneeded $@
 endif
 
@@ -147,7 +133,7 @@ $(DEF_FILE):
 ifeq ($(PLATFORM),windows)
 	@echo "LIBRARY ai.dll" > $@
 	@echo "EXPORTS" >> $@
-	@echo "    sqlite3_ai_init" >> $@
+	@echo "	sqlite3_ai_init" >> $@
 endif
 
 # Make sure the build and dist directories exist
@@ -157,42 +143,35 @@ $(shell mkdir -p $(BUILD_DIR) $(DIST_DIR))
 extension: $(TARGET)
 all: $(TARGET) 
 
-# Ensure object files are built first
-compile: $(OBJ_FILES)
-
 # Loadable library
-$(TARGET): $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
-ifeq ($(PLATFORM),windows)
-	$(CXX) $(OBJ_FILES) /link $(LDFLAGS)
-else
+$(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
 	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
+ifeq ($(PLATFORM),windows)
+	# Generate import library for Windows
+	dlltool -D $@ -d $(DEF_FILE) -l $(DIST_DIR)/ai.lib
 endif
+	# Strip debug symbols
 	$(STRIP)
 
 # Object files
-ifeq ($(PLATFORM),windows)
-$(BUILD_DIR)/%.obj: %.c
-	$(CC) $(CFLAGS) /c $< /Fo$@
-else
 $(BUILD_DIR)/%.o: %.c
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
-endif
 
 test: $(TARGET)
 	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
 
-# Build submodules (only after successful compilation of the extension)
-build/llama.cpp.stamp: | compile
+# Build submodules
+build/llama.cpp.stamp:
 	cmake -B $(BUILD_LLAMA) $(LLAMA_OPTIONS) $(LLAMA_DIR)
 	cmake --build $(BUILD_LLAMA) --config Release -- -j$(CPUS)
 	touch $@
 
-build/whisper.cpp.stamp: | compile
+build/whisper.cpp.stamp:
 	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
 	cmake --build $(BUILD_WHISPER) --config Release -- -j$(CPUS)
 	touch $@
 
-build/miniaudio.stamp: | compile
+build/miniaudio.stamp:
 	cmake -B $(BUILD_MINIAUDIO) $(MINIAUDIO_OPTIONS) $(MINIAUDIO_DIR)
 	cmake --build $(BUILD_MINIAUDIO) --config Release -- -j$(CPUS)
 	touch $@
@@ -229,4 +208,4 @@ help:
 	@echo "  test					- Test the extension"
 	@echo "  help					- Display this help message"
 
-.PHONY: all clean test extension help compile
+.PHONY: all clean test extension help
