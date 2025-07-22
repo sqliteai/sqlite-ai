@@ -369,25 +369,15 @@ int ai_uuid_v7_generate (uint8_t value[UUID_LEN]) {
     #endif
     
     // get current timestamp in ms
-    uint64_t timestamp;
-    #if defined(_WIN32)
-    // Use GetSystemTimeAsFileTime for Windows/MinGW
-    FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
-    uint64_t t = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
-    // Convert FILETIME (100-ns intervals since Jan 1, 1601) to ms since Unix epoch
-    timestamp = (t / 10000ULL) - 11644473600000ULL;
-    #else
     struct timespec ts;
-    #if defined(__ANDROID__)
+    #ifdef __ANDROID__
     if (clock_gettime(CLOCK_REALTIME, &ts) != 0) return -1;
     #else
     if (timespec_get(&ts, TIME_UTC) == 0) return -1;
     #endif
-    timestamp = (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-    #endif
     
     // add timestamp part to UUID
+    uint64_t timestamp = (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
     value[0] = (timestamp >> 40) & 0xFF;
     value[1] = (timestamp >> 32) & 0xFF;
     value[2] = (timestamp >> 24) & 0xFF;
