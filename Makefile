@@ -125,6 +125,11 @@ else # linux
 	MINIAUDIO_LDFLAGS += -lpthread -lm
 	LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+	# Add Vulkan library for linux-vulkan build
+	ifneq (,$(findstring VULKAN,$(LLAMA)))
+		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-vulkan/libggml-vulkan.a
+		LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-vulkan -lggml-vulkan -lvulkan
+	endif
 	STRIP = strip --strip-unneeded $@
 endif
 
