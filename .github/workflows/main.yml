@@ -15,33 +15,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: linux-vulkan
-            os: ubuntu-latest
+          - os: ubuntu-latest
             arch: x86_64
+            name: linux-vulkan
             make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
-          - name: macos
-            os: macos-latest
-          - name: windows
-            os: windows-latest
-            arch: x86_64
-          - name: windows-cuda
-            os: windows-latest
-            arch: x86_64
-            make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON"
-          - name: android
-            os: ubuntu-latest
+          - os: macos-latest
+            name: macos
+          # - os: windows-latest
+          #   arch: x86_64
+          #   name: windows
+          - os: ubuntu-latest
             arch: arm64-v8a
+            name: android
             make: PLATFORM=android ARCH=arm64-v8a
-          - name: android
-            os: ubuntu-latest
+          - os: ubuntu-latest
             arch: x86_64
+            name: android
             make: PLATFORM=android ARCH=x86_64
             sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
-          - name: ios
-            os: macos-latest
+          - os: macos-latest
+            name: ios
             make: PLATFORM=ios
-          - name: isim
-            os: macos-latest
+          - os: macos-latest
+            name: isim
             make: PLATFORM=isim
 
     defaults:
@@ -54,11 +50,14 @@ jobs:
         with:
           submodules: true
 
-      - name: linux install dependencies
-        if: matrix.name == 'linux-vulkan'
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y build-essential wget git cmake sqlite3 libcurl4-openssl-dev
+      - uses: msys2/setup-msys2@v2.27.0
+        if: matrix.os == 'windows-latest'
+        with:
+          msystem: mingw64
+          install: >-
+            mingw-w64-x86_64-cc
+            mingw-w64-x86_64-cmake
+            make
 
       - name: linux install vulkan
         if: matrix.name == 'linux-vulkan'
@@ -77,27 +76,18 @@ jobs:
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
           echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
 
+      - name: windows build sqlite-ai
+        if: matrix.name == 'windows'
+        run: make extension ${{ matrix.make && matrix.make || ''}}
+        shell: msys2 {0}
 
-      - name: Install CUDA Toolkit
-        if: matrix.name == 'windows-cuda'
-        run: |
-          choco install cuda -y --no-progress
-        shell: powershell
-
-      - name: Setup MSBuild
-        if: matrix.name == 'windows' || matrix.name == 'windows-cuda'
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Windows build sqlite-ai
-        if: matrix.name == 'windows' || matrix.name == 'windows-cuda'
-        shell: cmd
-        run: |
-          call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat"
-          nmake /f Makefile PLATFORM=windows ${{ matrix.make && matrix.make || ''}}
-      
       - name: build sqlite-ai
         if: matrix.name != 'windows'
         run: make extension ${{ matrix.make && matrix.make || ''}}
+
+      - name: windows install sqlite3
+        if: matrix.os == 'windows-latest'
+        run: choco install sqlite -y
 
       - name: macos install sqlite3 without SQLITE_OMIT_LOAD_EXTENSION
         if: matrix.name == 'macos'
@@ -145,16 +135,8 @@ jobs:
             adb push ${{ github.workspace }}/. /data/local/tmp/
             adb shell "sh /data/local/tmp/commands.sh"
 
-
-      - name: windows test sqlite-ai
-        if: matrix.os == 'windows-latest'
-        run: |
-          call "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          nmake /f Makefile test PLATFORM=windows
-        shell: cmd
-
       - name: test sqlite-ai
-        if: matrix.name == 'linux' || matrix.name == 'macos'
+        if: matrix.name == 'linux' || matrix.name == 'windows' || matrix.name == 'macos'
         run: make test
 
       - uses: actions/upload-artifact@v4.6.2
