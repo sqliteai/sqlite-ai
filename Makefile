@@ -133,8 +133,8 @@ ifneq (,$(findstring VULKAN,$(LLAMA)))
 	# Add Vulkan SDK library path if available
 	ifdef VULKAN_SDK
 		LLAMA_LDFLAGS += -L$(VULKAN_SDK)/lib -lvulkan
-	else
-		LLAMA_LDFLAGS += -ldl
+	else # system Vulkan library locations
+		LLAMA_LDFLAGS += -lvulkan -ldl
 	endif
 endif
 ifneq (,$(findstring OPENCL,$(LLAMA)))
