@@ -69,17 +69,8 @@ jobs:
           
           # macOS builds
           - os: macos-latest
-            name: macos-cpu
-            make: LLAMA="-DGGML_NATIVE=ON"
-          - os: macos-latest
-            name: macos-metal
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_METAL=ON" WHISPER="-DGGML_METAL=ON"
-          - os: macos-latest
-            name: macos-accelerate
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple"
-          - os: macos-latest
-            name: macos-coreml
-            make: WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+            name: macos
+            make: LLAMA="-DGGML_NATIVE=ON -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           
           # Windows builds (commented out but ready to enable)
           # - os: windows-latest

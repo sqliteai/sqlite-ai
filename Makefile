@@ -66,7 +66,7 @@ ifeq ($(PLATFORM),windows)
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
-	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -framework Accelerate -dynamiclib -undefined dynamic_lookup
+	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup
 	CFLAGS += -arch x86_64 -arch arm64
 	LLAMA_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	WHISPER_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
@@ -148,9 +148,8 @@ ifneq (,$(findstring BLAS,$(LLAMA)))
 	ifneq (,$(findstring OpenBLAS,$(LLAMA)))
 		LLAMA_LDFLAGS += -lopenblas
 	else ifneq (,$(findstring Apple,$(LLAMA)))
-		# Apple Accelerate is already linked in macOS section
-	else
-		# Generic BLAS
+		LDFLAGS += -framework Accelerate
+	else # Generic BLAS
 		LLAMA_LDFLAGS += -lblas
 	endif
 endif
