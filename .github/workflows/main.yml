@@ -45,6 +45,28 @@ jobs:
             name: linux-opencl
             make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
           
+          # Linux ARM64 builds
+          - os: LinuxARM64
+            arch: arm64
+            name: linux-arm64-cpu
+            make: LLAMA="-DGGML_NATIVE=ON"
+          - os: LinuxARM64
+            arch: arm64
+            name: linux-arm64-neon
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8.2-a"
+          - os: LinuxARM64
+            arch: arm64
+            name: linux-arm64-openblas
+            make: LLAMA="-DGGML_NATIVE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
+          - os: LinuxARM64
+            arch: arm64
+            name: linux-arm64-vulkan
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
+          - os: LinuxARM64
+            arch: arm64
+            name: linux-arm64-opencl
+            make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
+          
           # macOS builds
           - os: macos-latest
             name: macos-cpu
@@ -114,17 +136,17 @@ jobs:
           sudo apt-get install -y build-essential wget git cmake sqlite3 libcurl4-openssl-dev
           
       - name: linux install openblas
-        if: matrix.name == 'linux-openblas'
+        if: contains(matrix.name, 'openblas')
         run: |
           sudo apt-get install -y libopenblas-dev
           
       - name: linux install opencl
-        if: matrix.name == 'linux-opencl'
+        if: contains(matrix.name, 'opencl')
         run: |
           sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
 
       - name: linux install vulkan
-        if: matrix.name == 'linux-vulkan'
+        if: contains(matrix.name, 'vulkan')
         run: |
           wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
