@@ -165,33 +165,23 @@ jobs:
       - name: linux install vulkan (arm64)
         if: contains(matrix.name, 'vulkan') && matrix.arch == 'arm64'
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan-dev vulkan-validationlayers-dev spirv-tools
-          # Try to install glslc from system packages first
-          sudo apt-get install -y glslc || true
-          # If glslc is not available, install from Vulkan SDK
-          if ! which glslc; then
-            # Install Vulkan SDK for ARM64
-            wget -q https://sdk.lunarg.com/sdk/download/latest/linux/vulkan-sdk.tar.xz -O vulkan-sdk.tar.xz
-            tar -xf vulkan-sdk.tar.xz
-            SDK_DIR=$(ls -d 1.* | head -n1)
-            if [ -d "$SDK_DIR" ]; then
-              cd "$SDK_DIR"
-              source setup-env.sh
-              echo "VULKAN_SDK=$VULKAN_SDK" >> $GITHUB_ENV
-              echo "PATH=$PATH" >> $GITHUB_ENV
-              echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
-              echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
-            else
-              # Fallback: set basic Vulkan environment
-              echo "VULKAN_SDK=/usr" >> $GITHUB_ENV
-              echo "VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d" >> $GITHUB_ENV
-            fi
-          else
-            # Use system installation
-            echo "VULKAN_SDK=/usr" >> $GITHUB_ENV
-            echo "VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d" >> $GITHUB_ENV
-          fi
+          sudo dpkg --add-architecture arm64
+
+          # Add arch-specific repositories for non-amd64 architectures
+          cat << EOF | sudo tee /etc/apt/sources.list.d/arm64-ports.list
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble main universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble-updates main universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble-security main universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble-backports main universe
+          EOF
+
+          sudo apt-get update || true    ;# Prevent failure due to missing URLs.
+
+          sudo apt-get install -y --no-install-recommends \
+                  build-essential \
+                  glslc \
+                  crossbuild-essential-arm64 \
+                  libvulkan-dev:arm64
 
       - name: windows build sqlite-ai
         if: matrix.name == 'windows'
