@@ -18,7 +18,7 @@ jobs:
           - os: ubuntu-latest
             arch: x86_64
             name: linux-vulkan
-            make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_VULKAN=ON"
           - os: macos-latest
             name: macos
           # - os: windows-latest
