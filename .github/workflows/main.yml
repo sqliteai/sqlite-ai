@@ -184,7 +184,7 @@ jobs:
         run: choco install sqlite -y
 
       - name: macos install sqlite3 without SQLITE_OMIT_LOAD_EXTENSION
-        if: startsWith(matrix.name, 'macos-')
+        if: matrix.name == 'macos'
         run: brew link sqlite --force
 
       - name: android setup test environment
@@ -230,7 +230,7 @@ jobs:
             adb shell "sh /data/local/tmp/commands.sh"
 
       - name: test sqlite-ai
-        if: startsWith(matrix.name, 'linux-') || startsWith(matrix.name, 'windows-') || startsWith(matrix.name, 'macos-')
+        if: startsWith(matrix.name, 'linux-') || startsWith(matrix.name, 'windows-') || matrix.name == 'macos'
         run: make test
 
       - uses: actions/upload-artifact@v4.6.2
