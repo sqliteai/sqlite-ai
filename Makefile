@@ -132,6 +132,12 @@ endif
 ifneq (,$(findstring VULKAN,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-vulkan/libggml-vulkan.a
 	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-vulkan -lggml-vulkan
+	# Add Vulkan SDK library path if available
+	ifdef VULKAN_SDK
+		LLAMA_LDFLAGS += -L$(VULKAN_SDK)/lib -lvulkan
+	else
+		LLAMA_LDFLAGS += -ldl
+	endif
 else # CPU
 	LLAMA_LDFLAGS += -lggml-cpu
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/libggml-cpu.a
