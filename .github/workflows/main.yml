@@ -69,14 +69,14 @@ jobs:
             make: LLAMA="-DGGML_NATIVE=ON -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           
           # Windows builds (commented out but ready to enable)
-          # - os: windows-latest
-          #   arch: x86_64
-          #   name: windows-cpu
-          #   make: LLAMA="-DGGML_NATIVE=ON"
-          # - os: windows-latest
-          #   arch: x86_64
-          #   name: windows-vulkan
-          #   make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
+          - os: windows-latest
+            arch: x86_64
+            name: windows-cpu
+            make: LLAMA="-DGGML_NATIVE=ON"
+          - os: windows-latest
+            arch: x86_64
+            name: windows-vulkan
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
           
           # Android builds
           - os: ubuntu-latest
