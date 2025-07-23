@@ -118,6 +118,7 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-vulkan-headers
             mingw-w64-x86_64-vulkan-loader
+            mingw-w64-x86_64-shaderc
             make
           
       - name: linux install openblas
