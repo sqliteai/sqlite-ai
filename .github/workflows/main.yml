@@ -112,6 +112,7 @@ jobs:
         with:
           msystem: mingw64
           install: >-
+            git
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
             make
