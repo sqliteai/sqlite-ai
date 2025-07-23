@@ -113,9 +113,9 @@ jobs:
           msystem: mingw64
           install: >-
             git
+            sqlite
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
-            mingw-w64-sqlite3
             mingw-w64-x86_64-vulkan-headers
             mingw-w64-x86_64-vulkan-loader
             make
