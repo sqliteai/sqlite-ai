@@ -69,6 +69,7 @@ ifeq ($(PLATFORM),windows)
 	LDFLAGS += -shared
 	# Create .def file for Windows
 	DEF_FILE := $(BUILD_DIR)/ai.def
+	LDFLAGS += -lbcrypt -lgomp
 	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
