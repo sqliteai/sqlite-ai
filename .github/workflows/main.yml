@@ -117,17 +117,17 @@ jobs:
             make
           
       - name: linux install openblas
-        if: contains(matrix.name, 'openblas')
+        if: matrix.name == 'linux-openblas'
         run: |
           sudo apt-get install -y libopenblas-dev
           
       - name: linux install opencl
-        if: contains(matrix.name, 'opencl')
+        if: matrix.name == 'linux-opencl'
         run: |
           sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
 
       - name: linux install vulkan (x86_64)
-        if: contains(matrix.name, 'linux-vulkan') && matrix.arch == 'x86_64'
+        if: matrix.name == 'linux-vulkan' && matrix.arch == 'x86_64'
         run: |
           wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
@@ -144,7 +144,7 @@ jobs:
           echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
 
       - name: linux install vulkan (arm64)
-        if: contains(matrix.name, 'linux-vulkan') && matrix.arch == 'arm64'
+        if: matrix.name == 'linux-vulkan' && matrix.arch == 'arm64'
         run: |
           sudo dpkg --add-architecture arm64
 
@@ -164,13 +164,15 @@ jobs:
                   crossbuild-essential-arm64 \
                   libvulkan-dev:arm64
 
-      - name: windows build sqlite-ai
-        if: matrix.name == 'windows'
-        run: make extension ${{ matrix.make && matrix.make || ''}}
+      - name: windows build modules
+        if: matrix.os == 'windows-latest'
+        run: |
+          make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+          make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+          make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
 
       - name: build sqlite-ai
-        if: matrix.name != 'windows'
         run: make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows install sqlite3
