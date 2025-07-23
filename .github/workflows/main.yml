@@ -170,10 +170,12 @@ jobs:
       - name: windows install vulkan
         if: matrix.name == 'windows-vulkan'
         run: |
-          curl.exe -o $env:RUNNER_TEMP/VulkanSDK-Installer.exe -L "https://sdk.lunarg.com/sdk/download/${env:VULKAN_VERSION}/windows/vulkansdk-windows-X64-${env:VULKAN_VERSION}.exe"
-          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
-          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
-          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
+          # Use chocolatey to install Vulkan SDK
+          choco install vulkan-sdk -y
+          # Find the Vulkan SDK installation directory
+          $VulkanPath = Get-ChildItem -Path "C:\VulkanSDK" -Directory | Select-Object -Last 1 -ExpandProperty FullName
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=$VulkanPath"
+          Add-Content $env:GITHUB_PATH "$VulkanPath\bin"
         shell: pwsh
 
       - name: windows build sqlite-ai
