@@ -88,7 +88,7 @@ jobs:
           - os: windows-latest
             arch: x86_64
             name: windows-openblas
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
+            make: LLAMA="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
           - os: windows-latest
             arch: x86_64
             name: windows-llamafile
@@ -153,6 +153,8 @@ jobs:
             ${{ contains(matrix.name, 'vulkan') && 'mingw-w64-x86_64-vulkan-loader' || '' }}
             ${{ contains(matrix.name, 'vulkan') && 'mingw-w64-x86_64-shaderc' || '' }}
             ${{ contains(matrix.name, 'openblas') && 'mingw-w64-x86_64-openblas' || '' }}
+            ${{ contains(matrix.name, 'openblas') && 'base-devel' || '' }}
+            ${{ contains(matrix.name, 'openblas') && 'mingw-w64-x86_64-toolchain' || '' }}
             ${{ contains(matrix.name, 'opencl') && 'mingw-w64-x86_64-opencl-headers' || '' }}
             ${{ contains(matrix.name, 'opencl') && 'mingw-w64-x86_64-opencl-icd' || '' }}
           
