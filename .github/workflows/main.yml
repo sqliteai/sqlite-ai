@@ -167,14 +167,6 @@ jobs:
                   crossbuild-essential-arm64 \
                   libvulkan-dev:arm64
 
-      - name: windows build modules
-        if: matrix.os == 'windows-latest'
-        run: |
-          make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
-          make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
-          make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
-        shell: msys2 {0}
-
       - name: windows build sqlite-ai
         if: matrix.os == 'windows-latest'
         run: make extension ${{ matrix.make && matrix.make || ''}}
