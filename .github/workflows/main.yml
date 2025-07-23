@@ -115,6 +115,7 @@ jobs:
             git
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
+            mingw-w64-sqlite3
             mingw-w64-x86_64-vulkan-headers
             mingw-w64-x86_64-vulkan-loader
             make
@@ -182,10 +183,6 @@ jobs:
       - name: build sqlite-ai
         if: matrix.os != 'windows-latest'
         run: make extension ${{ matrix.make && matrix.make || ''}}
-
-      - name: windows install sqlite3
-        if: matrix.os == 'windows-latest'
-        run: choco install sqlite -y
 
       - name: macos install sqlite3 without SQLITE_OMIT_LOAD_EXTENSION
         if: matrix.name == 'macos'
