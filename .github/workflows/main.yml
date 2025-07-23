@@ -81,18 +81,34 @@ jobs:
             arch: x86_64
             name: windows-cpu-avx512
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX512=ON -DGGML_AVX512_VNNI=ON -DGGML_AVX512_VBMI=ON -DGGML_AVX512_BF16=ON"
-          # - os: windows-latest
-          #   arch: x86_64
-          #   name: windows-openblas
-          #   make: LLAMA="-DGGML_NATIVE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
-          # - os: windows-latest
-          #   arch: x86_64
-          #   name: windows-vulkan
-          #   make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
-          # - os: windows-latest
-          #   arch: x86_64
-          #   name: windows-opencl
-          #   make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
+          - os: windows-latest
+            arch: x86_64
+            name: windows-cpu-avx-vnni
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX_VNNI=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
+          - os: windows-latest
+            arch: x86_64
+            name: windows-openblas
+            make: LLAMA="-DGGML_NATIVE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
+          - os: windows-latest
+            arch: x86_64
+            name: windows-llamafile
+            make: LLAMA="-DGGML_NATIVE=ON -DGGML_LLAMAFILE=ON"
+          - os: windows-latest
+            arch: x86_64
+            name: windows-cuda
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CUDA=ON"
+          - os: windows-latest
+            arch: x86_64
+            name: windows-vulkan
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
+          - os: windows-latest
+            arch: x86_64
+            name: windows-opencl
+            make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
+          - os: windows-latest
+            arch: x86_64
+            name: windows-hip
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_HIP=ON"
           
           # Android builds
           - os: ubuntu-latest
@@ -193,6 +209,23 @@ jobs:
         run: |
           # MSYS2 Vulkan packages are already installed, just set up environment
           echo "VULKAN_SDK=C:/msys64/mingw64" >> $GITHUB_ENV
+        shell: bash
+
+      - name: windows install cuda toolkit
+        if: matrix.name == 'windows-cuda'
+        run: |
+          # Install CUDA toolkit using chocolatey
+          choco install cuda --version=12.6.3 -y
+          echo "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6" >> $GITHUB_ENV
+          echo "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin" >> $GITHUB_PATH
+        shell: pwsh
+
+      - name: windows install hip toolkit
+        if: matrix.name == 'windows-hip'
+        run: |
+          # ROCm/HIP is complex on Windows, for now we'll try to use available packages
+          # This might need manual installation or Docker approach for full support
+          echo "HIP_PATH=C:\hip" >> $GITHUB_ENV
         shell: bash
 
       - name: windows build sqlite-ai

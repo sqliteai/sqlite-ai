@@ -152,7 +152,10 @@ ifneq (,$(findstring VULKAN,$(LLAMA)))
 endif
 ifneq (,$(findstring OPENCL,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-opencl/libggml-opencl.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl $(L)ggml-opencl$(A) -lOpenCL -ldl
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl $(L)ggml-opencl$(A) -lOpenCL
+	ifneq ($(PLATFORM),windows)
+		LLAMA_LDFLAGS += -ldl
+	endif
 endif
 ifneq (,$(findstring BLAS,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
@@ -171,6 +174,20 @@ ifneq (,$(findstring COREML,$(WHISPER))) # CoreML - only macos
 	WHISPER_LDFLAGS += -lwhisper.coreml
 	WHISPER_OPTIONS += -DWHISPER_COREML=ON
 	LDFLAGS += -framework CoreML
+endif
+ifneq (,$(findstring CUDA,$(LLAMA)))
+	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/libggml-cuda.a
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda $(L)ggml-cuda$(A) -lcuda -lcublas -lcublasLt -lcudart
+	ifneq ($(PLATFORM),windows)
+		LLAMA_LDFLAGS += -ldl
+	endif
+endif
+ifneq (,$(findstring HIP,$(LLAMA)))
+	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/libggml-hip.a
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip $(L)ggml-hip$(A) -lhip -lrocblas
+	ifneq ($(PLATFORM),windows)
+		LLAMA_LDFLAGS += -ldl
+	endif
 endif
 
 # Windows .def file generation
