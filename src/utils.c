@@ -370,16 +370,7 @@ int ai_uuid_v7_generate (uint8_t value[UUID_LEN]) {
     
     // get current timestamp in ms
     struct timespec ts;
-    #ifdef _WIN32
-    // Windows doesn't have timespec_get in MinGW, use GetSystemTimeAsFileTime
-    FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
-    uint64_t wintime = ((uint64_t)ft.dwHighDateTime << 32) + ft.dwLowDateTime;
-    // Convert from 100ns intervals since 1601 to seconds since 1970
-    wintime = wintime / 10000000ULL - 11644473600ULL;
-    ts.tv_sec = (time_t)wintime;
-    ts.tv_nsec = ((((uint64_t)ft.dwHighDateTime << 32) + ft.dwLowDateTime) % 10000000ULL) * 100;
-    #elif defined(__ANDROID__)
+    #ifdef __ANDROID__
     if (clock_gettime(CLOCK_REALTIME, &ts) != 0) return -1;
     #else
     if (timespec_get(&ts, TIME_UTC) == 0) return -1;
