@@ -176,7 +176,13 @@ jobs:
           make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
 
+      - name: windows build sqlite-ai
+        if: matrix.os == 'windows-latest'
+        run: make extension ${{ matrix.make && matrix.make || ''}}
+        shell: msys2 {0}
+
       - name: build sqlite-ai
+        if: matrix.os != 'windows-latest'
         run: make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows install sqlite3
