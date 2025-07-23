@@ -193,19 +193,24 @@ test: $(TARGET)
 	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
 
 # Build submodules
+ifeq ($(PLATFORM),windows)
+	ARGS = --parallel $(CPUS)
+else
+	ARGS = -- -j$(CPUS)
+endif
 build/llama.cpp.stamp:
 	cmake -B $(BUILD_LLAMA) $(LLAMA_OPTIONS) $(LLAMA_DIR)
-	cmake --build $(BUILD_LLAMA) --config Release -- -j$(CPUS)
+	cmake --build $(BUILD_LLAMA) --config Release $(ARGS)
 	touch $@
 
 build/whisper.cpp.stamp:
 	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
-	cmake --build $(BUILD_WHISPER) --config Release -- -j$(CPUS)
+	cmake --build $(BUILD_WHISPER) --config Release $(ARGS)
 	touch $@
 
 build/miniaudio.stamp:
 	cmake -B $(BUILD_MINIAUDIO) $(MINIAUDIO_OPTIONS) $(MINIAUDIO_DIR)
-	cmake --build $(BUILD_MINIAUDIO) --config Release -- -j$(CPUS)
+	cmake --build $(BUILD_MINIAUDIO) --config Release $(ARGS)
 	touch $@
 
 $(LLAMA_LIBS): build/llama.cpp.stamp
