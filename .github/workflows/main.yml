@@ -44,23 +44,23 @@ jobs:
           # Linux ARM64 builds
           - os: LinuxARM64
             arch: arm64
-            name: linux-arm64-cpu
+            name: linux-cpu
             make: LLAMA="-DGGML_NATIVE=ON"
           - os: LinuxARM64
             arch: arm64
-            name: linux-arm64-neon
+            name: linux-neon
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8.2-a"
           - os: LinuxARM64
             arch: arm64
-            name: linux-arm64-openblas
+            name: linux-openblas
             make: LLAMA="-DGGML_NATIVE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
           - os: LinuxARM64
             arch: arm64
-            name: linux-arm64-vulkan
+            name: linux-vulkan
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
           - os: LinuxARM64
             arch: arm64
-            name: linux-arm64-opencl
+            name: linux-opencl
             make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
           
           # macOS builds
@@ -133,7 +133,7 @@ jobs:
           sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
 
       - name: linux install vulkan (x86_64)
-        if: contains(matrix.name, 'vulkan') && matrix.arch == 'x86_64'
+        if: contains(matrix.name, 'linux-vulkan') && matrix.arch == 'x86_64'
         run: |
           wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
@@ -150,7 +150,7 @@ jobs:
           echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
 
       - name: linux install vulkan (arm64)
-        if: contains(matrix.name, 'vulkan') && matrix.arch == 'arm64'
+        if: contains(matrix.name, 'linux-vulkan') && matrix.arch == 'arm64'
         run: |
           sudo dpkg --add-architecture arm64
 
