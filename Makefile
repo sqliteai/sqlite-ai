@@ -43,10 +43,17 @@ CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/in
 LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
 WHISPER_OPTIONS = $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF
 MINIAUDIO_OPTIONS = $(MINIAUDIO) -DBUILD_SHARED_LIBS=OFF -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
+# MinGW produces .a files without lib prefix, use -l:filename.a syntax
+ifeq ($(PLATFORM),windows)
+L = -l:
+A = .a
+else
+L = -l
+endif
 # Module-specific linker flags
-LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama -lggml -lggml-base -lggml-cpu
-WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
-MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
+LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src $(L)common$(A) $(L)llama$(A) $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
+WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src $(L)whisper$(A)
+MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) $(L)miniaudio$(A)
 LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 
 # Files
@@ -130,28 +137,28 @@ endif
 # Backend specific settings
 ifneq (,$(findstring VULKAN,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-vulkan/libggml-vulkan.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-vulkan -lggml-vulkan
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-vulkan $(L)ggml-vulkan$(A)
 	# Add Vulkan SDK library path if available
 	ifdef VULKAN_SDK
-		LLAMA_LDFLAGS += -L$(VULKAN_SDK)/lib -lvulkan
+		LLAMA_LDFLAGS += -L$(VULKAN_SDK)/lib $(L)vulkan$(A)
 	else # system Vulkan library locations
-		LLAMA_LDFLAGS += -lvulkan -ldl
+		LLAMA_LDFLAGS += $(L)vulkan$(A) $(L)dl$(A)
 	endif
 endif
 ifneq (,$(findstring OPENCL,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-opencl/libggml-opencl.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl -lggml-opencl -lOpenCL
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl $(L)ggml-opencl$(A) $(L)OpenCL$(A)
 endif
 ifneq (,$(findstring BLAS,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-blas$(A) $(L)ggml-blas$(A)
 	# Link against specific BLAS implementations
 	ifneq (,$(findstring OpenBLAS,$(LLAMA)))
-		LLAMA_LDFLAGS += -lopenblas
+		LLAMA_LDFLAGS += $(L)openblas$(A)
 	else ifneq (,$(findstring Apple,$(LLAMA)))
 		LDFLAGS += -framework Accelerate
 	else # Generic BLAS
-		LLAMA_LDFLAGS += -lblas
+		LLAMA_LDFLAGS += $(L)blas$(A)
 	endif
 endif
 ifneq (,$(findstring COREML,$(WHISPER))) # CoreML - only macos
