@@ -139,16 +139,20 @@ endif
 ifneq (,$(findstring VULKAN,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-vulkan/libggml-vulkan.a
 	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-vulkan $(L)ggml-vulkan$(A)
+	# Vulkan variations
+	ifeq ($(PLATFORM),windows)
+		VULKAN_VAR = -1
+	endif
 	# Add Vulkan SDK library path if available
 	ifdef VULKAN_SDK
-		LLAMA_LDFLAGS += -L$(VULKAN_SDK)/lib -lvulkan
+		LLAMA_LDFLAGS += -L$(VULKAN_SDK)/lib -lvulkan$(VULKAN_VAR)
 	else # system Vulkan library locations
-		LLAMA_LDFLAGS += -lvulkan -ldl
+		LLAMA_LDFLAGS += -lvulkan$(VULKAN_VAR) -ldl
 	endif
 endif
 ifneq (,$(findstring OPENCL,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-opencl/libggml-opencl.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl $(L)ggml-opencl$(A) -lOpenCL
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl $(L)ggml-opencl$(A) -lOpenCL -ldl
 endif
 ifneq (,$(findstring BLAS,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
