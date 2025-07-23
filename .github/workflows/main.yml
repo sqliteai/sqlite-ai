@@ -129,7 +129,7 @@ jobs:
         run: |
           sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
 
-      - name: linux install vulkan (x86_64)
+      - name: linux-x86_64 install vulkan
         if: matrix.name == 'linux-vulkan' && matrix.arch == 'x86_64'
         run: |
           wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
@@ -146,7 +146,7 @@ jobs:
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
           echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
 
-      - name: linux install vulkan (arm64)
+      - name: linux-arm64 install vulkan
         if: matrix.name == 'linux-vulkan' && matrix.arch == 'arm64'
         run: |
           sudo dpkg --add-architecture arm64
