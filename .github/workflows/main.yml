@@ -234,8 +234,13 @@ jobs:
             adb push ${{ github.workspace }}/. /data/local/tmp/
             adb shell "sh /data/local/tmp/commands.sh"
 
+      - name: windows test sqlite-ai
+        if: startsWith(matrix.name, 'windows-')
+        run: make test
+        shell: msys2 {0}
+
       - name: test sqlite-ai
-        if: startsWith(matrix.name, 'linux-') || startsWith(matrix.name, 'windows-') || matrix.name == 'macos'
+        if: startsWith(matrix.name, 'linux-') || matrix.name == 'macos'
         run: make test
 
       - uses: actions/upload-artifact@v4.6.2
