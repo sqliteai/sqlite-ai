@@ -44,23 +44,23 @@ jobs:
           # Linux ARM64 builds
           - os: LinuxARM64
             arch: arm64
-            name: linux-arm64-cpu
+            name: linux-cpu
             make: LLAMA="-DGGML_NATIVE=ON"
           - os: LinuxARM64
             arch: arm64
-            name: linux-arm64-neon
+            name: linux-neon
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8.2-a"
           - os: LinuxARM64
             arch: arm64
-            name: linux-arm64-openblas
+            name: linux-openblas
             make: LLAMA="-DGGML_NATIVE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
           - os: LinuxARM64
             arch: arm64
-            name: linux-arm64-vulkan
+            name: linux-vulkan
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
           - os: LinuxARM64
             arch: arm64
-            name: linux-arm64-opencl
+            name: linux-opencl
             make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
           
           # macOS builds
@@ -68,15 +68,31 @@ jobs:
             name: macos
             make: LLAMA="-DGGML_NATIVE=ON -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           
-          # Windows builds (commented out but ready to enable)
+          # Windows builds
+          - os: windows-latest
+            arch: x86_64
+            name: windows-cpu
+            make: LLAMA="-DGGML_NATIVE=ON"
+          - os: windows-latest
+            arch: x86_64
+            name: windows-cpu-avx2
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DGGML_SSE42=ON"
+          - os: windows-latest
+            arch: x86_64
+            name: windows-cpu-avx512
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX512=ON -DGGML_AVX512_VNNI=ON -DGGML_AVX512_VBMI=ON -DGGML_AVX512_BF16=ON"
           # - os: windows-latest
           #   arch: x86_64
-          #   name: windows-cpu
-          #   make: LLAMA="-DGGML_NATIVE=ON"
+          #   name: windows-openblas
+          #   make: LLAMA="-DGGML_NATIVE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
           # - os: windows-latest
           #   arch: x86_64
           #   name: windows-vulkan
           #   make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
+          # - os: windows-latest
+          #   arch: x86_64
+          #   name: windows-opencl
+          #   make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
           
           # Android builds
           - os: ubuntu-latest
@@ -112,28 +128,30 @@ jobs:
         with:
           msystem: mingw64
           install: >-
+            git
+            make
+            sqlite
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
-            make
-
-      - name: linux install dependencies
-        if: startsWith(matrix.name, 'linux-')
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y build-essential wget git cmake sqlite3 libcurl4-openssl-dev
+            ${{ contains(matrix.name, 'vulkan') && 'mingw-w64-x86_64-vulkan-headers' || '' }}
+            ${{ contains(matrix.name, 'vulkan') && 'mingw-w64-x86_64-vulkan-loader' || '' }}
+            ${{ contains(matrix.name, 'vulkan') && 'mingw-w64-x86_64-shaderc' || '' }}
+            ${{ contains(matrix.name, 'openblas') && 'mingw-w64-x86_64-openblas' || '' }}
+            ${{ contains(matrix.name, 'opencl') && 'mingw-w64-x86_64-opencl-headers' || '' }}
+            ${{ contains(matrix.name, 'opencl') && 'mingw-w64-x86_64-opencl-icd' || '' }}
           
       - name: linux install openblas
-        if: contains(matrix.name, 'openblas')
+        if: matrix.name == 'linux-openblas'
         run: |
           sudo apt-get install -y libopenblas-dev
           
       - name: linux install opencl
-        if: contains(matrix.name, 'opencl')
+        if: matrix.name == 'linux-opencl'
         run: |
           sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
 
-      - name: linux install vulkan (x86_64)
-        if: contains(matrix.name, 'vulkan') && matrix.arch == 'x86_64'
+      - name: linux-x86_64 install vulkan
+        if: matrix.name == 'linux-vulkan' && matrix.arch == 'x86_64'
         run: |
           wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
@@ -149,8 +167,8 @@ jobs:
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
           echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
 
-      - name: linux install vulkan (arm64)
-        if: contains(matrix.name, 'vulkan') && matrix.arch == 'arm64'
+      - name: linux-arm64 install vulkan
+        if: matrix.name == 'linux-vulkan' && matrix.arch == 'arm64'
         run: |
           sudo dpkg --add-architecture arm64
 
@@ -170,18 +188,21 @@ jobs:
                   crossbuild-essential-arm64 \
                   libvulkan-dev:arm64
 
+      - name: windows setup vulkan environment
+        if: matrix.name == 'windows-vulkan'
+        run: |
+          # MSYS2 Vulkan packages are already installed, just set up environment
+          echo "VULKAN_SDK=C:/msys64/mingw64" >> $GITHUB_ENV
+        shell: bash
+
       - name: windows build sqlite-ai
-        if: matrix.name == 'windows'
+        if: matrix.os == 'windows-latest'
         run: make extension ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
 
       - name: build sqlite-ai
-        if: matrix.name != 'windows'
+        if: matrix.os != 'windows-latest'
         run: make extension ${{ matrix.make && matrix.make || ''}}
-
-      - name: windows install sqlite3
-        if: matrix.os == 'windows-latest'
-        run: choco install sqlite -y
 
       - name: macos install sqlite3 without SQLITE_OMIT_LOAD_EXTENSION
         if: matrix.name == 'macos'
@@ -229,8 +250,13 @@ jobs:
             adb push ${{ github.workspace }}/. /data/local/tmp/
             adb shell "sh /data/local/tmp/commands.sh"
 
+      - name: windows test sqlite-ai
+        if: startsWith(matrix.name, 'windows-')
+        run: make test
+        shell: msys2 {0}
+
       - name: test sqlite-ai
-        if: startsWith(matrix.name, 'linux-') || startsWith(matrix.name, 'windows-') || matrix.name == 'macos'
+        if: startsWith(matrix.name, 'linux-') || matrix.name == 'macos'
         run: make test
 
       - uses: actions/upload-artifact@v4.6.2

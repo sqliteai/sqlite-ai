@@ -43,8 +43,15 @@ CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/in
 LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
 WHISPER_OPTIONS = $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF
 MINIAUDIO_OPTIONS = $(MINIAUDIO) -DBUILD_SHARED_LIBS=OFF -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
+# MinGW produces .a files without lib prefix, use -l:filename.a syntax
+ifeq ($(PLATFORM),windows)
+L = -l:
+A = .a
+else
+L = -l
+endif
 # Module-specific linker flags
-LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama -lggml -lggml-base -lggml-cpu
+LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
 WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
 MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
 LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
@@ -62,6 +69,7 @@ ifeq ($(PLATFORM),windows)
 	LDFLAGS += -shared
 	# Create .def file for Windows
 	DEF_FILE := $(BUILD_DIR)/ai.def
+	LDFLAGS += -lbcrypt -lgomp -lstdc++
 	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
@@ -94,9 +102,10 @@ else ifeq ($(PLATFORM),android)
 	CXX = $(CC)++
 	TARGET := $(DIST_DIR)/ai.so
 	LDFLAGS += -static-libstdc++ -shared
-	LLAMA_OPTIONS += -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-	WHISPER_OPTIONS += -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-	MINIAUDIO_OPTIONS += -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+	ANDROID_OPTIONS = -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+	LLAMA_OPTIONS += $(ANDROID_OPTIONS) -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF
+	WHISPER_OPTIONS += $(ANDROID_OPTIONS) -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF
+	MINIAUDIO_OPTIONS += $(ANDROID_OPTIONS)
 	STRIP = $(BIN)/llvm-strip --strip-unneeded $@
 else ifeq ($(PLATFORM),ios)
 	TARGET := $(DIST_DIR)/ai.dylib
@@ -129,21 +138,25 @@ endif
 # Backend specific settings
 ifneq (,$(findstring VULKAN,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-vulkan/libggml-vulkan.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-vulkan -lggml-vulkan
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-vulkan $(L)ggml-vulkan$(A)
+	# Vulkan variations
+	ifeq ($(PLATFORM),windows)
+		VULKAN_VAR = -1
+	endif
 	# Add Vulkan SDK library path if available
 	ifdef VULKAN_SDK
-		LLAMA_LDFLAGS += -L$(VULKAN_SDK)/lib -lvulkan
+		LLAMA_LDFLAGS += -L$(VULKAN_SDK)/lib -lvulkan$(VULKAN_VAR)
 	else # system Vulkan library locations
-		LLAMA_LDFLAGS += -lvulkan -ldl
+		LLAMA_LDFLAGS += -lvulkan$(VULKAN_VAR) -ldl
 	endif
 endif
 ifneq (,$(findstring OPENCL,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-opencl/libggml-opencl.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl -lggml-opencl -lOpenCL
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl $(L)ggml-opencl$(A) -lOpenCL -ldl
 endif
 ifneq (,$(findstring BLAS,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-blas $(L)ggml-blas$(A)
 	# Link against specific BLAS implementations
 	ifneq (,$(findstring OpenBLAS,$(LLAMA)))
 		LLAMA_LDFLAGS += -lopenblas
@@ -193,19 +206,24 @@ test: $(TARGET)
 	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
 
 # Build submodules
+ifeq ($(PLATFORM),windows)
+    ARGS = --parallel $(CPUS)
+else
+    ARGS = -- -j$(CPUS)
+endif
 build/llama.cpp.stamp:
 	cmake -B $(BUILD_LLAMA) $(LLAMA_OPTIONS) $(LLAMA_DIR)
-	cmake --build $(BUILD_LLAMA) --config Release -- -j$(CPUS)
+	cmake --build $(BUILD_LLAMA) --config Release $(ARGS)
 	touch $@
 
 build/whisper.cpp.stamp:
 	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
-	cmake --build $(BUILD_WHISPER) --config Release -- -j$(CPUS)
+	cmake --build $(BUILD_WHISPER) --config Release $(ARGS)
 	touch $@
 
 build/miniaudio.stamp:
 	cmake -B $(BUILD_MINIAUDIO) $(MINIAUDIO_OPTIONS) $(MINIAUDIO_DIR)
-	cmake --build $(BUILD_MINIAUDIO) --config Release -- -j$(CPUS)
+	cmake --build $(BUILD_MINIAUDIO) --config Release $(ARGS)
 	touch $@
 
 $(LLAMA_LIBS): build/llama.cpp.stamp
