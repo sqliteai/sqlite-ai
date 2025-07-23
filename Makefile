@@ -51,9 +51,9 @@ else
 L = -l
 endif
 # Module-specific linker flags
-LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src $(L)common$(A) $(L)llama$(A) $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
-WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src $(L)whisper$(A)
-MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) $(L)miniaudio$(A)
+LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
+WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
+MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
 LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 
 # Files
@@ -140,25 +140,25 @@ ifneq (,$(findstring VULKAN,$(LLAMA)))
 	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-vulkan $(L)ggml-vulkan$(A)
 	# Add Vulkan SDK library path if available
 	ifdef VULKAN_SDK
-		LLAMA_LDFLAGS += -L$(VULKAN_SDK)/lib $(L)vulkan$(A)
+		LLAMA_LDFLAGS += -L$(VULKAN_SDK)/lib -lvulkan
 	else # system Vulkan library locations
-		LLAMA_LDFLAGS += $(L)vulkan$(A) $(L)dl$(A)
+		LLAMA_LDFLAGS += -lvulkan -ldl
 	endif
 endif
 ifneq (,$(findstring OPENCL,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-opencl/libggml-opencl.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl $(L)ggml-opencl$(A) $(L)OpenCL$(A)
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl $(L)ggml-opencl$(A) -lOpenCL
 endif
 ifneq (,$(findstring BLAS,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-blas$(A) $(L)ggml-blas$(A)
+	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-blas $(L)ggml-blas$(A)
 	# Link against specific BLAS implementations
 	ifneq (,$(findstring OpenBLAS,$(LLAMA)))
-		LLAMA_LDFLAGS += $(L)openblas$(A)
+		LLAMA_LDFLAGS += -lopenblas
 	else ifneq (,$(findstring Apple,$(LLAMA)))
 		LDFLAGS += -framework Accelerate
 	else # Generic BLAS
-		LLAMA_LDFLAGS += $(L)blas$(A)
+		LLAMA_LDFLAGS += -lblas
 	endif
 endif
 ifneq (,$(findstring COREML,$(WHISPER))) # CoreML - only macos
