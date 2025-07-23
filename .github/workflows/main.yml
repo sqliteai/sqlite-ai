@@ -115,6 +115,7 @@ jobs:
             git
             base-devel
             mingw-w64-x86_64-cc
+            mingw-w64-x86_64-c++
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-toolchain
             make
