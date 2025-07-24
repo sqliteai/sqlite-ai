@@ -292,7 +292,7 @@ jobs:
 
       - name: windows test sqlite-ai
         if: startsWith(matrix.name, 'windows-')
-        run: make test
+        run: make test ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
 
       - name: test sqlite-ai
