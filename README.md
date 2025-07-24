@@ -64,9 +64,9 @@ SELECT llm_text_generate('What is the most beautiful city in Italy?');
 
 Use SQLite-AI alongside:
 
-* **[SQLite-Vector](https://github.com/sqlite-ai/sqlite-vector)** – vector search from SQL
-* **[SQLite-Sync](https://github.com/sqlite-ai/sqlite-sync)** – sync on-device databases with the cloud
-* **[SQLite-JS](https://github.com/sqlite-ai/sqlite-js)** – define SQLite functions in JavaScript
+* **[SQLite-Vector](https://github.com/sqliteai/sqlite-vector)** – vector search from SQL
+* **[SQLite-Sync](https://github.com/sqliteai/sqlite-sync)** – sync on-device databases with the cloud
+* **[SQLite-JS](https://github.com/sqliteai/sqlite-js)** – define SQLite functions in JavaScript
 
 ---
 
