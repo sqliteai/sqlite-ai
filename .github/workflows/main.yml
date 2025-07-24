@@ -149,14 +149,12 @@ jobs:
             sqlite
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
-            ${{ contains(matrix.name, 'vulkan') && 'mingw-w64-x86_64-vulkan-headers' || '' }}
-            ${{ contains(matrix.name, 'vulkan') && 'mingw-w64-x86_64-vulkan-loader' || '' }}
-            ${{ contains(matrix.name, 'vulkan') && 'mingw-w64-x86_64-shaderc' || '' }}
-            ${{ contains(matrix.name, 'openblas') && 'mingw-w64-x86_64-openblas' || '' }}
-            ${{ contains(matrix.name, 'openblas') && 'base-devel' || '' }}
-            ${{ contains(matrix.name, 'openblas') && 'mingw-w64-x86_64-toolchain' || '' }}
-            ${{ contains(matrix.name, 'opencl') && 'mingw-w64-x86_64-opencl-headers' || '' }}
-            ${{ contains(matrix.name, 'opencl') && 'mingw-w64-x86_64-opencl-icd' || '' }}
+            ${{ matrix.name == 'windows-vulkan' && 'mingw-w64-x86_64-vulkan-headers' || '' }}
+            ${{ matrix.name == 'windows-vulkan' && 'mingw-w64-x86_64-vulkan-loader' || '' }}
+            ${{ matrix.name == 'windows-vulkan' && 'mingw-w64-x86_64-shaderc' || '' }}
+            ${{ matrix.name == 'windows-openblas' && 'mingw-w64-x86_64-openblas' || '' }}
+            ${{ matrix.name == 'windows-opencl' && 'mingw-w64-x86_64-opencl-headers' || '' }}
+            ${{ matrix.name == 'windows-opencl' && 'mingw-w64-x86_64-opencl-icd' || '' }}
           
       - name: linux install openblas
         if: matrix.name == 'linux-openblas'
