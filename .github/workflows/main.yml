@@ -108,7 +108,7 @@ jobs:
           - os: windows-latest
             arch: x86_64
             name: windows-hip
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"$HIP_PATH/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"$HIP_PATH/bin/clang++.exe\" -DCMAKE_CXX_FLAGS=\"-I$(pwd)/rocwmma/library/include/ -Wno-ignored-attributes -Wno-nested-anon-types\""
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"$HIP_PATH/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"$HIP_PATH/bin/clang++.exe\" -DCMAKE_CXX_FLAGS=\"-I$(pwd)/rocwmma/library/include/ -Wno-ignored-attributes -Wno-nested-anon-types\""
           
           # Android builds
           - os: ubuntu-latest
