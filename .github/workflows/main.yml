@@ -226,9 +226,15 @@ jobs:
       - name: windows install hip toolkit
         if: matrix.name == 'windows-hip'
         run: |
-          # ROCm/HIP is complex on Windows, for now we'll try to use available packages
-          # This might need manual installation or Docker approach for full support
-          echo "HIP_PATH=C:\hip" >> $GITHUB_ENV
+          git clone https://github.com/rocm/rocwmma --branch rocm-6.2.4 --depth 1
+          $ErrorActionPreference = "Stop"
+          write-host "Downloading AMD HIP SDK Installer"
+          Invoke-WebRequest -Uri "https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-24.Q3-WinSvr2022-For-HIP.exe" -OutFile "${env:RUNNER_TEMP}\rocm-install.exe"
+          write-host "Installing AMD HIP SDK"
+          Start-Process "${env:RUNNER_TEMP}\rocm-install.exe" -ArgumentList '-install' -NoNewWindow -Wait
+          write-host "Completed AMD HIP SDK installation"
+          & 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' --version
+        shell: pwsh
 
       - name: windows build sqlite-ai
         if: matrix.os == 'windows-latest'
