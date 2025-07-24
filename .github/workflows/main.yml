@@ -214,6 +214,7 @@ jobs:
         shell: bash
 
       - name: windows install cuda
+        if: matrix.name == 'windows-cuda'
         uses: ./modules/llama.cpp/.github/actions/windows-setup-cuda
         with:
           cuda_version: '12.4'
