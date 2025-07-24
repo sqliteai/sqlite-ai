@@ -178,7 +178,10 @@ endif
 ifneq (,$(findstring CUDA,$(LLAMA)))
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/libggml-cuda.a
 	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda $(L)ggml-cuda$(A) -lcuda -lcublas -lcublasLt -lcudart
-	ifneq ($(PLATFORM),windows)
+	# Set CUDA host compiler for Windows MinGW builds
+	ifeq ($(PLATFORM),windows)
+		LLAMA_OPTIONS += -DCMAKE_CUDA_HOST_COMPILER=g++
+	else
 		LLAMA_LDFLAGS += -ldl
 	endif
 endif
