@@ -209,7 +209,6 @@ jobs:
         run: |
           # MSYS2 Vulkan packages are already installed, just set up environment
           echo "VULKAN_SDK=C:/msys64/mingw64" >> $GITHUB_ENV
-        shell: bash
 
       - name: windows install cuda
         if: matrix.name == 'windows-cuda'
@@ -223,7 +222,6 @@ jobs:
           # Configure CUDA to use GCC instead of MSVC
           echo "CUDAHOSTCXX=g++" >> $GITHUB_ENV
           echo "CUDA_HOST_COMPILER=g++" >> $GITHUB_ENV
-        shell: bash
 
       - name: windows install hip toolkit
         if: matrix.name == 'windows-hip'
@@ -231,7 +229,6 @@ jobs:
           # ROCm/HIP is complex on Windows, for now we'll try to use available packages
           # This might need manual installation or Docker approach for full support
           echo "HIP_PATH=C:\hip" >> $GITHUB_ENV
-        shell: bash
 
       - name: windows build sqlite-ai
         if: matrix.os == 'windows-latest'
