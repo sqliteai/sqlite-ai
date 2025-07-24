@@ -96,7 +96,7 @@ jobs:
           - os: windows-latest
             arch: x86_64
             name: windows-cuda
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CUDA=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON"
           - os: windows-latest
             arch: x86_64
             name: windows-vulkan
@@ -213,14 +213,10 @@ jobs:
           echo "VULKAN_SDK=C:/msys64/mingw64" >> $GITHUB_ENV
         shell: bash
 
-      - name: windows install cuda toolkit
-        if: matrix.name == 'windows-cuda'
-        run: |
-          # Install CUDA toolkit using chocolatey
-          choco install cuda --version=12.6.3 -y
-          echo "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6" >> $GITHUB_ENV
-          echo "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin" >> $GITHUB_PATH
-        shell: pwsh
+      - name: windows install cuda
+        uses: ./modules/llama.cpp/.github/actions/windows-setup-cuda
+        with:
+          cuda_version: '12.4'
 
       - name: windows install hip toolkit
         if: matrix.name == 'windows-hip'
