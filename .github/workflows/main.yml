@@ -234,6 +234,8 @@ jobs:
           Start-Process "${env:RUNNER_TEMP}\rocm-install.exe" -ArgumentList '-install' -NoNewWindow -Wait
           write-host "Completed AMD HIP SDK installation"
           & 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' --version
+          echo "HIP_PATH=$(Resolve-Path 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' | split-path | split-path)" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$(Resolve-Path 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' | split-path | split-path)" >> $GITHUB_ENV
         shell: pwsh
 
       - name: windows build sqlite-ai
