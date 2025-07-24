@@ -235,8 +235,8 @@ jobs:
           write-host "Completed AMD HIP SDK installation"
           & 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' --version
           $HIP_PWSH = "$(Resolve-Path 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' | split-path | split-path)"
-          "HIP_PATH=$($HIP_PWSH.Path.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "CMAKE_PREFIX_PATH=$($HIP_PWSH.Path.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "HIP_PATH=$($HIP_PWSH.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "CMAKE_PREFIX_PATH=$($HIP_PWSH.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_ENV -Append
         shell: pwsh
 
       - name: windows build sqlite-ai
