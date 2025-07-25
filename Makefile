@@ -66,10 +66,9 @@ MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
-	LDFLAGS += -shared
+	LDFLAGS += -shared -lbcrypt -lgomp -lstdc++
 	# Create .def file for Windows
 	DEF_FILE := $(BUILD_DIR)/ai.def
-	LDFLAGS += -lbcrypt -lgomp -lstdc++
 	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
@@ -176,10 +175,13 @@ ifneq (,$(findstring COREML,$(WHISPER))) # CoreML - only macos
 	LDFLAGS += -framework CoreML
 endif
 ifneq (,$(findstring CUDA,$(LLAMA)))
-	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/libggml-cuda.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda $(L)ggml-cuda$(A) -lcuda -lcublas -lcublasLt -lcudart
+	#LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/libggml-cuda.a
+	#LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda $(L)ggml-cuda$(A) -lcuda -lcublas -lcublasLt -lcudart
 	ifneq ($(PLATFORM),windows)
 		LLAMA_LDFLAGS += -ldl
+	else
+		#A = .lib
+		LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda/Release -L./$(BUILD_LLAMA)/ggml/src/Release $(L)ggml$(A) $(L)ggml-base.lib $(L)ggml-cuda.lib
 	endif
 endif
 ifneq (,$(findstring HIP,$(LLAMA)))
