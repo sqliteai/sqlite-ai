@@ -108,7 +108,7 @@ jobs:
           - os: windows-latest
             arch: x86_64
             name: windows-hip
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"$HIP_PATH/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"$HIP_PATH/bin/clang++.exe\" -DCMAKE_CXX_FLAGS=\"-I$(pwd)/rocwmma/library/include/\""
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_CXX_FLAGS=\"-I$(pwd)/rocwmma/library/include/\""
           
           # Android builds
           - os: ubuntu-latest
@@ -216,11 +216,12 @@ jobs:
         with:
           cuda_version: '12.4'
 
-      - name: windows build llama.cpp with cuda and msvc
+      - name: windows build sqlite-ai with cuda
         if: matrix.name == 'windows-cuda'
-        run: make extension ${{ matrix.make && matrix.make || ''}}
-        continue-on-error: true
-        shell: pwsh
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          D:\a\_temp\msys64\usr\bin\make.exe extension ${{ matrix.make && matrix.make || ''}}
+        shell: cmd
 
       - name: windows install hip toolkit
         if: matrix.name == 'windows-hip'
@@ -242,7 +243,7 @@ jobs:
         shell: pwsh
 
       - name: windows build sqlite-ai
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && matrix.name != 'windows-cuda'
         run: make extension ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
         env:
