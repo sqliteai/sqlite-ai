@@ -241,13 +241,13 @@ build/llama.cpp.stamp:
 
 build/whisper.cpp.stamp: build/llama.cpp.stamp
 	# Create ggml package config for whisper.cpp to find
-	mkdir -p $(BUILD_WHISPER)/ggml-config
-	echo 'set(ggml_FOUND TRUE)' > $(BUILD_WHISPER)/ggml-config/ggml-config.cmake
-	echo 'set(ggml_INCLUDE_DIRS "$(shell pwd)/$(BUILD_LLAMA)/ggml/src")' >> $(BUILD_WHISPER)/ggml-config/ggml-config.cmake
-	echo 'set(ggml_LIBRARIES "$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml.a;$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml-base.a;$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml-cpu.a")' >> $(BUILD_WHISPER)/ggml-config/ggml-config.cmake
-	echo 'add_library(ggml::ggml INTERFACE IMPORTED)' >> $(BUILD_WHISPER)/ggml-config/ggml-config.cmake
-	echo 'set_target_properties(ggml::ggml PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "$${ggml_INCLUDE_DIRS}" INTERFACE_LINK_LIBRARIES "$${ggml_LIBRARIES}")' >> $(BUILD_WHISPER)/ggml-config/ggml-config.cmake
-	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) -DCMAKE_MODULE_PATH=$(shell pwd)/$(BUILD_WHISPER)/ggml-config $(WHISPER_DIR)
+	mkdir -p $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml
+	echo 'set(ggml_FOUND TRUE)' > $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml/ggmlConfig.cmake
+	echo 'set(ggml_INCLUDE_DIRS "$(shell pwd)/$(BUILD_LLAMA)/ggml/src")' >> $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml/ggmlConfig.cmake
+	echo 'set(ggml_LIBRARIES "$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml.a;$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml-base.a;$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml-cpu.a")' >> $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml/ggmlConfig.cmake
+	echo 'add_library(ggml::ggml INTERFACE IMPORTED)' >> $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml/ggmlConfig.cmake
+	echo 'set_target_properties(ggml::ggml PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "$${ggml_INCLUDE_DIRS}" INTERFACE_LINK_LIBRARIES "$${ggml_LIBRARIES}")' >> $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml/ggmlConfig.cmake
+	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) -DCMAKE_PREFIX_PATH=$(shell pwd)/$(BUILD_WHISPER)/ggml-config $(WHISPER_DIR)
 	cmake --build $(BUILD_WHISPER) --config Release $(WHISPER_ARGS) $(ARGS)
 	touch $@
 
