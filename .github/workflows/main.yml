@@ -237,12 +237,17 @@ jobs:
           $HIP_PWSH = "$(Resolve-Path 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' | split-path | split-path)"
           "HIP_PATH=$($HIP_PWSH.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_ENV -Append
           "CMAKE_PREFIX_PATH=$($HIP_PWSH.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "HIP_PLATFORM=amd" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # Ensure hip-config.cmake can find hipconfig
+          "PATH=$env:PATH;$($HIP_PWSH.Replace('\', '/'))/bin" | Out-File -FilePath $env:GITHUB_ENV -Append
         shell: pwsh
 
       - name: windows build sqlite-ai
         if: matrix.os == 'windows-latest'
         run: make extension ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
+        env:
+          HIP_PLATFORM: amd
 
       - name: build sqlite-ai
         if: matrix.os != 'windows-latest'
