@@ -224,23 +224,27 @@ test: $(TARGET)
 
 # Build submodules
 ifeq ($(PLATFORM),windows)
-    ARGS = --parallel $(CPUS)
+    ifneq (,$(findstring Ninja,$(LLAMA)))
+        ARGS = -j $(CPUS)
+    else
+        ARGS = --parallel $(CPUS)
+    endif
 else
     ARGS = -- -j$(CPUS)
 endif
 build/llama.cpp.stamp:
 	cmake -B $(BUILD_LLAMA) $(LLAMA_OPTIONS) $(LLAMA_DIR)
-	cmake --build $(BUILD_LLAMA) --config Release $(ARGS)
+	cmake --build $(BUILD_LLAMA) --config Release $(LLAMA_ARGS) $(ARGS)
 	touch $@
 
 build/whisper.cpp.stamp:
 	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
-	cmake --build $(BUILD_WHISPER) --config Release $(ARGS)
+	cmake --build $(BUILD_WHISPER) --config Release $(WHISPER_ARGS) $(ARGS)
 	touch $@
 
 build/miniaudio.stamp:
 	cmake -B $(BUILD_MINIAUDIO) $(MINIAUDIO_OPTIONS) $(MINIAUDIO_DIR)
-	cmake --build $(BUILD_MINIAUDIO) --config Release $(ARGS)
+	cmake --build $(BUILD_MINIAUDIO) --config Release $(MINIAUDIO_ARGS) $(ARGS)
 	touch $@
 
 $(LLAMA_LIBS): build/llama.cpp.stamp
