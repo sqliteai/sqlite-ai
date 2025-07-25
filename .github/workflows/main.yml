@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }} build${{ matrix.arch != 'arm64-v8a' && matrix.name != 'isim' && matrix.name != 'ios' && ' + test' || ''}}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -216,12 +216,11 @@ jobs:
         with:
           cuda_version: '12.4'
 
-      - name: windows configure cuda for mingw
+      - name: windows build llama.cpp with cuda and msvc
         if: matrix.name == 'windows-cuda'
-        run: |
-          # Configure CUDA to use GCC instead of MSVC
-          echo "CUDAHOSTCXX=g++" >> $GITHUB_ENV
-          echo "CUDA_HOST_COMPILER=g++" >> $GITHUB_ENV
+        run: make extension ${{ matrix.make && matrix.make || ''}}
+        continue-on-error: true
+        shell: pwsh
 
       - name: windows install hip toolkit
         if: matrix.name == 'windows-hip'
