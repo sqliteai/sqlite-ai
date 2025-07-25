@@ -223,7 +223,7 @@ jobs:
 
       - name: windows build ggml-cuda
         if: matrix.name == 'windows-cuda'
-        run: make build/llama.cpp.stamp LLAMA="-G \"Ninja Multi-Config\" -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON" LLAMA_ARGS="--target ggml-cuda"
+        run: make build/llama.cpp.stamp LLAMA="-G Ninja Multi-Config -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON" LLAMA_ARGS="--target ggml-cuda"
         shell: pwsh
 
       - name: windows install hip toolkit
