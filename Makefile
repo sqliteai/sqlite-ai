@@ -41,7 +41,7 @@ CC = gcc
 CXX = g++
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
 LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
-WHISPER_OPTIONS = $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF -DWHISPER_USE_SYSTEM_GGML=ON -Dggml_DIR=$(BUILD_LLAMA)/ggml/src
+WHISPER_OPTIONS = $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF -DWHISPER_USE_SYSTEM_GGML=ON
 MINIAUDIO_OPTIONS = $(MINIAUDIO) -DBUILD_SHARED_LIBS=OFF -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
 # MinGW produces .a files without lib prefix, use -l:filename.a syntax
 ifeq ($(PLATFORM),windows)
@@ -240,7 +240,14 @@ build/llama.cpp.stamp:
 	touch $@
 
 build/whisper.cpp.stamp: build/llama.cpp.stamp
-	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
+	# Create ggml package config for whisper.cpp to find
+	mkdir -p $(BUILD_WHISPER)/ggml-config
+	echo 'set(ggml_FOUND TRUE)' > $(BUILD_WHISPER)/ggml-config/ggml-config.cmake
+	echo 'set(ggml_INCLUDE_DIRS "$(shell pwd)/$(BUILD_LLAMA)/ggml/src")' >> $(BUILD_WHISPER)/ggml-config/ggml-config.cmake
+	echo 'set(ggml_LIBRARIES "$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml.a;$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml-base.a;$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml-cpu.a")' >> $(BUILD_WHISPER)/ggml-config/ggml-config.cmake
+	echo 'add_library(ggml::ggml INTERFACE IMPORTED)' >> $(BUILD_WHISPER)/ggml-config/ggml-config.cmake
+	echo 'set_target_properties(ggml::ggml PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "$${ggml_INCLUDE_DIRS}" INTERFACE_LINK_LIBRARIES "$${ggml_LIBRARIES}")' >> $(BUILD_WHISPER)/ggml-config/ggml-config.cmake
+	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) -DCMAKE_MODULE_PATH=$(shell pwd)/$(BUILD_WHISPER)/ggml-config $(WHISPER_DIR)
 	cmake --build $(BUILD_WHISPER) --config Release $(WHISPER_ARGS) $(ARGS)
 	touch $@
 
