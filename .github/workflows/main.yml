@@ -216,10 +216,16 @@ jobs:
         with:
           cuda_version: '12.4'
 
+      - name: windows install ninja for cuda
+        if: matrix.name == 'windows-cuda'
+        run: choco install ninja
+        shell: pwsh
+
       - name: windows build sqlite-ai with cuda
         if: matrix.name == 'windows-cuda'
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set CMAKE_GENERATOR=Ninja
           D:\a\_temp\msys64\usr\bin\make.exe extension ${{ matrix.make && matrix.make || ''}}
         shell: cmd
 
