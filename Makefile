@@ -41,7 +41,7 @@ CC = gcc
 CXX = g++
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
 LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
-WHISPER_OPTIONS = $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF -DWHISPER_USE_SYSTEM_GGML=ON
+WHISPER_OPTIONS = $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF
 MINIAUDIO_OPTIONS = $(MINIAUDIO) -DBUILD_SHARED_LIBS=OFF -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
 # MinGW produces .a files without lib prefix, use -l:filename.a syntax
 ifeq ($(PLATFORM),windows)
@@ -181,7 +181,7 @@ ifneq (,$(findstring CUDA,$(LLAMA)))
 		LLAMA_LDFLAGS += -ldl
 	else
 		#A = .lib
-		LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda/Release -L./$(BUILD_LLAMA)/ggml/src/Release $(L)ggml$(A) $(L)ggml-base.lib $(L)ggml-cuda.lib
+		LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common/Release -L./$(BUILD_LLAMA)/ggml/src/Release -L./$(BUILD_LLAMA)/src/Release -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda/Release $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-cuda.lib
 	endif
 endif
 ifneq (,$(findstring HIP,$(LLAMA)))
@@ -189,6 +189,8 @@ ifneq (,$(findstring HIP,$(LLAMA)))
 	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip $(L)ggml-hip$(A) -lhip -lrocblas
 	ifneq ($(PLATFORM),windows)
 		LLAMA_LDFLAGS += -ldl
+	else
+		LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_LLAMA)/ggml/src/ggml-hip $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-hip.lib
 	endif
 endif
 
@@ -239,15 +241,8 @@ build/llama.cpp.stamp:
 	cmake --build $(BUILD_LLAMA) --config Release $(LLAMA_ARGS) $(ARGS)
 	touch $@
 
-build/whisper.cpp.stamp: build/llama.cpp.stamp
-	# Create ggml package config for whisper.cpp to find
-	mkdir -p $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml
-	echo 'set(ggml_FOUND TRUE)' > $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml/ggmlConfig.cmake
-	echo 'set(ggml_INCLUDE_DIRS "$(shell pwd)/modules/llama.cpp/ggml/include")' >> $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml/ggmlConfig.cmake
-	echo 'set(ggml_LIBRARIES "$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml.a;$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml-base.a;$(shell pwd)/$(BUILD_LLAMA)/ggml/src/libggml-cpu.a")' >> $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml/ggmlConfig.cmake
-	echo 'add_library(ggml::ggml INTERFACE IMPORTED)' >> $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml/ggmlConfig.cmake
-	echo 'set_target_properties(ggml::ggml PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "$${ggml_INCLUDE_DIRS}" INTERFACE_LINK_LIBRARIES "$${ggml_LIBRARIES}")' >> $(BUILD_WHISPER)/ggml-config/lib/cmake/ggml/ggmlConfig.cmake
-	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) -DCMAKE_PREFIX_PATH=$(shell pwd)/$(BUILD_WHISPER)/ggml-config $(WHISPER_DIR)
+build/whisper.cpp.stamp:
+	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
 	cmake --build $(BUILD_WHISPER) --config Release $(WHISPER_ARGS) $(ARGS)
 	touch $@
 
