@@ -226,7 +226,7 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          make ${{ matrix.make && matrix.make || ''}}
+          make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows install hip toolkit
         if: matrix.name == 'windows-hip'
