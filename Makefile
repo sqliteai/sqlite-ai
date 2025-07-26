@@ -190,7 +190,7 @@ ifneq (,$(findstring HIP,$(LLAMA)))
 	ifneq ($(PLATFORM),windows)
 		LLAMA_LDFLAGS += -ldl
 	else
-		LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_LLAMA)/ggml/src/ggml-hip -L"$(HIP_PATH)/lib" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-hip.lib -lhip_hcc -lrocblas
+		LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_LLAMA)/ggml/src/ggml-hip -L"$(HIP_PATH)/lib" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-hip.lib -lamdhip64 -lrocblas
 	endif
 endif
 
