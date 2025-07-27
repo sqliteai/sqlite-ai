@@ -16,9 +16,11 @@
 #include <string.h>
 
 #ifdef _WIN32
+#define WIN32_NO_STATUS
 #include <windows.h>
 #include <objbase.h>
 #include <bcrypt.h>
+#undef WIN32_NO_STATUS
 #include <ntstatus.h> //for STATUS_SUCCESS
 #else
 #include <unistd.h>

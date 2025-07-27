@@ -631,7 +631,11 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     }
     
     // check if normalization is needed (default true)
-    (ai->options.normalize_embedding) ? llm_embed_normalize(result, embedding, dimension) : memcpy(embedding, result, sizeof(float) * dimension);
+    if (ai->options.normalize_embedding) {
+        llm_embed_normalize(result, embedding, dimension);
+    } else {
+        memcpy(embedding, result, sizeof(float) * dimension);
+    }
     
     // check if JSON output is set
     if (ai->options.json_output) {
