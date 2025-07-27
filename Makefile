@@ -37,9 +37,35 @@ BUILD_WHISPER = $(BUILD_DIR)/whisper.cpp
 BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 
 # Compiler and flags
-CC = gcc
-CXX = g++
-CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
+ifeq ($(PLATFORM),windows)
+	# Check if this is a CUDA or HIP build that needs MSVC
+	ifneq (,$(findstring CUDA,$(LLAMA)))
+		USE_MSVC = 1
+	endif
+	ifneq (,$(findstring HIP,$(LLAMA)))
+		USE_MSVC = 1
+	endif
+	
+	ifeq ($(USE_MSVC),1)
+		CC = cl
+		CXX = cl
+		CFLAGS = /nologo /I$(SRC_DIR) /I$(LLAMA_DIR)/ggml/include /I$(LLAMA_DIR)/include /I$(WHISPER_DIR)/include /I$(MINIAUDIO_DIR)
+		OBJ_EXT = .obj
+		LIB_EXT = .lib
+	else
+		CC = gcc
+		CXX = g++
+		CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
+		OBJ_EXT = .o
+		LIB_EXT = .a
+	endif
+else
+	CC = gcc
+	CXX = g++
+	CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
+	OBJ_EXT = .o
+	LIB_EXT = .a
+endif
 LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
 WHISPER_OPTIONS = $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF
 MINIAUDIO_OPTIONS = $(MINIAUDIO) -DBUILD_SHARED_LIBS=OFF -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
@@ -58,18 +84,29 @@ LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
-OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC_FILES)))
-LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/ggml/src/libggml.a $(BUILD_LLAMA)/ggml/src/libggml-base.a $(BUILD_LLAMA)/ggml/src/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
-WHISPER_LIBS = $(BUILD_WHISPER)/src/libwhisper.a
-MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
+OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%$(OBJ_EXT), $(notdir $(SRC_FILES)))
+ifeq ($(USE_MSVC),1)
+	LLAMA_LIBS = $(BUILD_LLAMA)/common/Release/common.lib $(BUILD_LLAMA)/ggml/src/Release/ggml.lib $(BUILD_LLAMA)/ggml/src/Release/ggml-base.lib $(BUILD_LLAMA)/ggml/src/Release/ggml-cpu.lib $(BUILD_LLAMA)/src/Release/llama.lib
+	WHISPER_LIBS = $(BUILD_WHISPER)/src/Release/whisper.lib
+	MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/Release/miniaudio.lib
+else
+	LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/ggml/src/libggml.a $(BUILD_LLAMA)/ggml/src/libggml-base.a $(BUILD_LLAMA)/ggml/src/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
+	WHISPER_LIBS = $(BUILD_WHISPER)/src/libwhisper.a
+	MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
+endif
 
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
-	LDFLAGS += -shared -lbcrypt -lgomp -lstdc++
-	# Create .def file for Windows
-	DEF_FILE := $(BUILD_DIR)/ai.def
-	STRIP = strip --strip-unneeded $@
+	ifeq ($(USE_MSVC),1)
+		LDFLAGS += /DLL bcrypt.lib
+		DEF_FILE := $(BUILD_DIR)/ai.def
+		STRIP = echo "No stripping needed for MSVC"
+	else
+		LDFLAGS += -shared -lbcrypt -lgomp -lstdc++
+		DEF_FILE := $(BUILD_DIR)/ai.def
+		STRIP = strip --strip-unneeded $@
+	endif
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
@@ -175,26 +212,39 @@ ifneq (,$(findstring COREML,$(WHISPER))) # CoreML - only macos
 	LDFLAGS += -framework CoreML
 endif
 ifneq (,$(findstring CUDA,$(LLAMA)))
-	#LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/libggml-cuda.a
-	#LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda $(L)ggml-cuda$(A) -lcuda -lcublas -lcublasLt -lcudart
 	ifneq ($(PLATFORM),windows)
-		LLAMA_LDFLAGS += -ldl
+		LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda $(L)ggml-cuda$(A) -lcuda -lcublas -lcublasLt -lcudart -ldl
+		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/libggml-cuda.a
 	else
-		#A = .lib
-		LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common/Release -L./$(BUILD_LLAMA)/ggml/src/Release -L./$(BUILD_LLAMA)/src/Release -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda/Release -L"$(CUDA_PATH)/lib/x64" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-cuda.lib -lcuda -lcudart
-		WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -L./$(BUILD_WHISPER)/src/Release -lwhisper
-		MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -L./$(BUILD_MINIAUDIO)/Release -lminiaudio
+		ifeq ($(USE_MSVC),1)
+			# MSVC CUDA build - use .lib files and MSVC linker syntax
+			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/Release/ggml-cuda.lib
+			LDFLAGS += "$(CUDA_PATH)/lib/x64/cuda.lib" "$(CUDA_PATH)/lib/x64/cudart.lib"
+		else
+			# MinGW CUDA build - use original approach
+			LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common/Release -L./$(BUILD_LLAMA)/ggml/src/Release -L./$(BUILD_LLAMA)/src/Release -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda/Release -L"$(CUDA_PATH)/lib/x64" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-cuda.lib -lcuda -lcudart
+			WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -L./$(BUILD_WHISPER)/src/Release -lwhisper
+			MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -L./$(BUILD_MINIAUDIO)/Release -lminiaudio
+			$(error Windows MinGW CUDA build is not supported yet)
+		endif
 	endif
 endif
 ifneq (,$(findstring HIP,$(LLAMA)))
-	#LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/libggml-hip.a
-	#LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip $(L)ggml-hip$(A) -lhip -lrocblas
 	ifneq ($(PLATFORM),windows)
-		LLAMA_LDFLAGS += -ldl
+		LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip $(L)ggml-hip$(A) -lhip -lrocblas -ldl
+		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/libggml-hip.a
 	else
-		LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_LLAMA)/ggml/src/ggml-hip -L"$(HIP_PATH)/lib" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-hip.lib -lamdhip64 -lhip -lrocblas
-		WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -L./$(BUILD_WHISPER)/src/Release -lwhisper
-		MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -L./$(BUILD_MINIAUDIO)/Release -lminiaudio
+		ifeq ($(USE_MSVC),1)
+			# MSVC HIP build - use .lib files and MSVC linker syntax
+			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/Release/ggml-hip.lib
+			LDFLAGS += "$(HIP_PATH)/lib/amdhip64.lib" "$(HIP_PATH)/lib/rocblas.lib"
+		else
+			# MinGW HIP build - use original approach
+			LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_LLAMA)/ggml/src/ggml-hip -L"$(HIP_PATH)/lib" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-hip.lib -lamdhip64 -lhip -lrocblas
+			WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -L./$(BUILD_WHISPER)/src/Release -lwhisper
+			MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -L./$(BUILD_MINIAUDIO)/Release -lminiaudio
+			$(error Windows MinGW HIP build is not supported yet)
+		endif
 	endif
 endif
 
@@ -215,17 +265,25 @@ all: $(TARGET)
 
 # Loadable library
 $(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
+ifeq ($(USE_MSVC),1)
+	link /nologo $(LDFLAGS) /DEF:$(DEF_FILE) /OUT:$@ $(OBJ_FILES) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
+else
 	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
 	# Generate import library for Windows
 	dlltool -D $@ -d $(DEF_FILE) -l $(DIST_DIR)/ai.lib
 endif
+endif
 	# Strip debug symbols
 	$(STRIP)
 
 # Object files
-$(BUILD_DIR)/%.o: %.c
+$(BUILD_DIR)/%$(OBJ_EXT): %.c
+ifeq ($(USE_MSVC),1)
+	$(CC) $(CFLAGS) /O2 /c $< /Fo:$@
+else
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
+endif
 
 test: $(TARGET)
 	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"

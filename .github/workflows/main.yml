@@ -221,7 +221,7 @@ jobs:
         run: choco install ninja
         shell: pwsh
 
-      - name: windows build ggml-cuda
+      - name: windows build sqlite-ai with cuda (msvc)
         if: matrix.name == 'windows-cuda'
         shell: cmd
         run: |
@@ -247,16 +247,20 @@ jobs:
           "PATH=$env:PATH;$($HIP_PWSH.Replace('\', '/'))/bin" | Out-File -FilePath $env:GITHUB_ENV -Append
         shell: pwsh
 
-      - name: windows build sqlite-ai
-        if: matrix.os == 'windows-latest'
+      - name: windows build sqlite-ai with hip (msvc)
+        if: matrix.name == 'windows-hip'
+        shell: cmd
         run: |
-          if [ "${{ matrix.name }}" = "windows-hip" ]; then
-            export PATH="$HIP_PATH/bin:$PATH"
-          fi
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set PATH=%HIP_PATH%\bin;%PATH%
           make extension ${{ matrix.make && matrix.make || ''}}
-        shell: msys2 {0}
         env:
           HIP_PLATFORM: amd
+
+      - name: windows build sqlite-ai (mingw)
+        if: matrix.os == 'windows-latest' && matrix.name != 'windows-cuda' && matrix.name != 'windows-hip'
+        run: make extension ${{ matrix.make && matrix.make || ''}}
+        shell: msys2 {0}
 
       - name: build sqlite-ai
         if: matrix.os != 'windows-latest'
@@ -308,8 +312,15 @@ jobs:
             adb push ${{ github.workspace }}/. /data/local/tmp/
             adb shell "sh /data/local/tmp/commands.sh"
 
-      - name: windows test sqlite-ai
-        if: startsWith(matrix.name, 'windows-')
+      - name: windows test sqlite-ai (msvc)
+        if: matrix.name == 'windows-cuda' || matrix.name == 'windows-hip'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          make test ${{ matrix.make && matrix.make || ''}}
+
+      - name: windows test sqlite-ai (mingw)
+        if: startsWith(matrix.name, 'windows-') && matrix.name != 'windows-cuda' && matrix.name != 'windows-hip'
         run: make test ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
 
