@@ -22,6 +22,7 @@
 #include <ntstatus.h> //for STATUS_SUCCESS
 #else
 #include <unistd.h>
+#include <time.h>
 #if defined(__APPLE__)
 #include <Security/Security.h>
 #elif !defined(__ANDROID__)
@@ -369,24 +370,25 @@ int ai_uuid_v7_generate (uint8_t value[UUID_LEN]) {
     #endif
     
     // get current timestamp in ms
-    struct timespec ts;
+    uint64_t timestamp;
     #ifdef _WIN32
     // Windows doesn't have timespec_get in MinGW, use GetSystemTimeAsFileTime
     FILETIME ft;
     GetSystemTimeAsFileTime(&ft);
     uint64_t wintime = ((uint64_t)ft.dwHighDateTime << 32) + ft.dwLowDateTime;
-    // Convert from 100ns intervals since 1601 to seconds since 1970
-    wintime = wintime / 10000000ULL - 11644473600ULL;
-    ts.tv_sec = (time_t)wintime;
-    ts.tv_nsec = ((((uint64_t)ft.dwHighDateTime << 32) + ft.dwLowDateTime) % 10000000ULL) * 100;
+    // Convert from 100ns intervals since 1601 to milliseconds since 1970
+    timestamp = wintime / 10000ULL - 11644473600000ULL;
     #elif defined(__ANDROID__)
+    struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts) != 0) return -1;
+    timestamp = (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
     #else
+    struct timespec ts;
     if (timespec_get(&ts, TIME_UTC) == 0) return -1;
+    timestamp = (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
     #endif
     
     // add timestamp part to UUID
-    uint64_t timestamp = (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
     value[0] = (timestamp >> 40) & 0xFF;
     value[1] = (timestamp >> 32) & 0xFF;
     value[2] = (timestamp >> 24) & 0xFF;
