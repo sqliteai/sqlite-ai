@@ -266,7 +266,7 @@ ifneq (,$(findstring HIP,$(LLAMA)))
 			#-L./$(BUILD_WHISPER)/src/Release -lwhisper
 			MINIAUDIO_LDFLAGS =
 			#-L./$(BUILD_MINIAUDIO)/Release -lminiaudio
-			LLAMA_LDFLAGS += -L"$(HIP_PATH)/lib" -lamdhip64 -lrocblas
+			LLAMA_LDFLAGS = -L"$(HIP_PATH)/lib" -lamdhip64 -lrocblas
 		else
 			# MinGW linker flags (should not be used for HIP)
 			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip -L"$(HIP_PATH)/lib" -lggml-hip -lamdhip64 -lrocblas
