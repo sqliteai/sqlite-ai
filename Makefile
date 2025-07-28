@@ -95,7 +95,7 @@ LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%$(OBJ_EXT), $(notdir $(SRC_FILES)))
 ifeq ($(USE_MSVC),1)
-	LLAMA_LIBS = $(BUILD_LLAMA)/common/Release/common.lib $(BUILD_LLAMA)/ggml/src/Release/ggml.lib $(BUILD_LLAMA)/ggml/src/Release/ggml-base.lib $(BUILD_LLAMA)/ggml/src/Release/ggml-cpu.lib $(BUILD_LLAMA)/src/Release/llama.lib
+	LLAMA_LIBS = $(BUILD_LLAMA)/common/Release/common.lib $(BUILD_LLAMA)/src/Release/llama.lib $(BUILD_LLAMA)/ggml/src/Release/ggml.lib $(BUILD_LLAMA)/ggml/src/Release/ggml-base.lib
 	WHISPER_LIBS = $(BUILD_WHISPER)/src/Release/whisper.lib
 	MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/Release/miniaudio.lib
 else
@@ -283,19 +283,6 @@ all: $(TARGET)
 # Loadable library
 $(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
 ifeq ($(USE_MSVC),1)
-	@echo "Checking build directories:"
-	@if [ -d "$(BUILD_LLAMA)" ]; then echo "✓ $(BUILD_LLAMA) exists"; else echo "✗ $(BUILD_LLAMA) missing"; fi
-	@if [ -d "$(BUILD_LLAMA)/ggml/src/Release" ]; then echo "✓ GGML Release dir exists"; else echo "✗ GGML Release dir missing"; fi
-	@echo "Contents of $(BUILD_LLAMA)/ggml/src/Release:"
-	@ls -la "$(BUILD_LLAMA)/ggml/src/Release/" || echo "Directory not found"
-	@echo "Checking for required library files:"
-	@for lib in $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS); do \
-		if [ -f "$$lib" ]; then \
-			echo "✓ Found: $$lib"; \
-		else \
-			echo "✗ Missing: $$lib"; \
-		fi; \
-	done
 	@echo /nologo $(LDFLAGS) /DEF:$(DEF_FILE) /OUT:$@ $(OBJ_FILES) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(MSVC_LIBS) > $(BUILD_DIR)/link.rsp
 	"$(VCToolsInstallDir)bin\Hostx64\x64\link.exe" @$(BUILD_DIR)/link.rsp
 else
