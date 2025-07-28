@@ -440,7 +440,7 @@ jobs:
           make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai with hip (clang)
-        if: false #matrix.name == 'windows-hip'
+        if: matrix.name == 'windows-hip'
         shell: cmd
         run: |
           set PATH=%HIP_PATH%\bin;%PATH%
@@ -521,7 +521,7 @@ jobs:
             adb shell "sh /data/local/tmp/commands.sh"
 
       - name: windows test sqlite-ai (msvc)
-        if: matrix.name == 'windows-cuda' || matrix.name == 'windows-sycl'
+        if: matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
