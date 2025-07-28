@@ -212,8 +212,17 @@ jobs:
           # MSYS2 Vulkan packages are already installed, just set up environment
           echo "VULKAN_SDK=C:/msys64/mingw64" >> $GITHUB_ENV
 
-      - name: windows install cuda
+      - name: cache cuda toolkit
         if: matrix.name == 'windows-cuda'
+        id: cache-cuda
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\Program Files\NVIDIA GPU Computing Toolkit
+          key: cuda-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-12.4
+
+      - name: windows install cuda
+        if: matrix.name == 'windows-cuda' && steps.cache-cuda.outputs.cache-hit != 'true'
         uses: ./modules/llama.cpp/.github/actions/windows-setup-cuda
         with:
           cuda_version: '12.4'
