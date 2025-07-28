@@ -46,12 +46,21 @@ ifeq ($(PLATFORM),windows)
 		USE_MSVC = 1
 	endif
 	# HIP builds use their own Clang compiler, not MSVC
+	ifneq (,$(findstring HIP,$(LLAMA)))
+		USE_HIP_CLANG = 1
+	endif
 	
 	ifeq ($(USE_MSVC),1)
 		CC = cl
 		CXX = cl
 		CFLAGS = /nologo /I$(SRC_DIR) /I$(LLAMA_DIR)/ggml/include /I$(LLAMA_DIR)/include /I$(WHISPER_DIR)/include /I$(MINIAUDIO_DIR)
 		OBJ_EXT = .obj
+		LIB_EXT = .lib
+	else ifeq ($(USE_HIP_CLANG),1)
+		CC = $(HIP_PATH)/bin/clang.exe
+		CXX = $(HIP_PATH)/bin/clang++.exe
+		CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
+		OBJ_EXT = .o
 		LIB_EXT = .lib
 	else
 		CC = gcc
@@ -95,6 +104,11 @@ LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%$(OBJ_EXT), $(notdir $(SRC_FILES)))
 ifeq ($(USE_MSVC),1)
+	LLAMA_LIBS = $(BUILD_LLAMA)/common/Release/common.lib $(BUILD_LLAMA)/src/Release/llama.lib $(BUILD_LLAMA)/ggml/src/Release/ggml.lib $(BUILD_LLAMA)/ggml/src/Release/ggml-base.lib
+	WHISPER_LIBS = $(BUILD_WHISPER)/src/Release/whisper.lib
+	MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/Release/miniaudio.lib
+else ifeq ($(USE_HIP_CLANG),1)
+	# HIP builds with MSVC create .lib files in Release/ directories
 	LLAMA_LIBS = $(BUILD_LLAMA)/common/Release/common.lib $(BUILD_LLAMA)/src/Release/llama.lib $(BUILD_LLAMA)/ggml/src/Release/ggml.lib $(BUILD_LLAMA)/ggml/src/Release/ggml-base.lib
 	WHISPER_LIBS = $(BUILD_WHISPER)/src/Release/whisper.lib
 	MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/Release/miniaudio.lib
@@ -244,9 +258,15 @@ ifneq (,$(findstring HIP,$(LLAMA)))
 		LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip $(L)ggml-hip$(A) -lhip -lrocblas -ldl
 		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/libggml-hip.a
 	else
-		# Windows HIP build - use MinGW-style linking with .lib files
-		LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip/Release -L"$(HIP_PATH)/lib" -lggml-hip -lamdhip64 -lrocblas
+		# Windows HIP build - HIP libraries are built as .lib files in Release/ directories
 		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/Release/ggml-hip.lib
+		ifeq ($(USE_HIP_CLANG),1)
+			# HIP Clang linker flags for .lib files
+			LLAMA_LDFLAGS += -L"$(HIP_PATH)/lib" -lamdhip64 -lrocblas
+		else
+			# MinGW linker flags (should not be used for HIP)
+			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip/Release -L"$(HIP_PATH)/lib" -lggml-hip -lamdhip64 -lrocblas
+		endif
 	endif
 endif
 ifneq (,$(findstring SYCL,$(LLAMA)))
@@ -289,6 +309,8 @@ ifeq ($(USE_MSVC),1)
 	@echo "Response file contents:"
 	@cat $(BUILD_DIR)/link.rsp
 	"$(VCToolsInstallDir)bin\Hostx64\x64\link.exe" @$(BUILD_DIR)/link.rsp
+else ifeq ($(USE_HIP_CLANG),1)
+	$(CXX) $(OBJ_FILES) -o $@ $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(LDFLAGS)
 else
 	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
