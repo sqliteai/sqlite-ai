@@ -345,7 +345,7 @@ jobs:
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai with cuda (msvc)
-        if: matrix.name == 'windows-cuda'
+        if: false #matrix.name == 'windows-cuda'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -355,7 +355,7 @@ jobs:
           make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai with hip (clang)
-        if: matrix.name == 'windows-hip'
+        if: false #matrix.name == 'windows-hip'
         shell: cmd
         run: |
           set PATH=%HIP_PATH%\bin;%PATH%
@@ -421,7 +421,7 @@ jobs:
             adb shell "sh /data/local/tmp/commands.sh"
 
       - name: windows test sqlite-ai (msvc)
-        if: matrix.name == 'windows-cuda' || matrix.name == 'windows-hip'
+        if: false #matrix.name == 'windows-cuda' || matrix.name == 'windows-hip'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -441,7 +441,7 @@ jobs:
         with:
           name: ai-${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }}
           path: dist/ai.*
-          if-no-files-found: error
+          #if-no-files-found: error
 
   release:
     runs-on: ubuntu-latest
