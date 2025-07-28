@@ -38,13 +38,11 @@ BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 
 # Compiler and flags
 ifeq ($(PLATFORM),windows)
-	# Check if this is a CUDA or HIP build that needs MSVC
+	# Check if this is a CUDA build that needs MSVC
 	ifneq (,$(findstring CUDA,$(LLAMA)))
 		USE_MSVC = 1
 	endif
-	ifneq (,$(findstring HIP,$(LLAMA)))
-		USE_MSVC = 1
-	endif
+	# HIP builds use their own Clang compiler, not MSVC
 	
 	ifeq ($(USE_MSVC),1)
 		CC = cl
@@ -242,17 +240,9 @@ ifneq (,$(findstring HIP,$(LLAMA)))
 		LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip $(L)ggml-hip$(A) -lhip -lrocblas -ldl
 		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/libggml-hip.a
 	else
-		ifeq ($(USE_MSVC),1)
-			# MSVC HIP build - use .lib files and MSVC linker syntax
-			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/Release/ggml-hip.lib
-			LDFLAGS += "$(HIP_PATH)/lib/amdhip64.lib" "$(HIP_PATH)/lib/rocblas.lib"
-		else
-			# MinGW HIP build - use original approach
-			LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -L./$(BUILD_LLAMA)/ggml/src/ggml-hip -L"$(HIP_PATH)/lib" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-hip.lib -lamdhip64 -lhip -lrocblas
-			WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -L./$(BUILD_WHISPER)/src/Release -lwhisper
-			MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -L./$(BUILD_MINIAUDIO)/Release -lminiaudio
-			$(error Windows MinGW HIP build is not supported yet)
-		endif
+		# Windows HIP build - use MinGW-style linking with .lib files
+		LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip/Release -L"$(HIP_PATH)/lib" -lggml-hip -lamdhip64 -lrocblas
+		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/Release/ggml-hip.lib
 	endif
 endif
 
