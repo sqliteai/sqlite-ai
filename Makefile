@@ -77,9 +77,17 @@ else
 L = -l
 endif
 # Module-specific linker flags
-LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
-WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
-MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
+ifeq ($(USE_MSVC),1)
+	# MSVC uses .lib files directly, no -L/-l flags needed for modules
+	LLAMA_LDFLAGS = 
+	WHISPER_LDFLAGS = 
+	MINIAUDIO_LDFLAGS = 
+else
+	# MinGW/GCC uses -L/-l flags
+	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
+	WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
+	MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
+endif
 LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 
 # Files
