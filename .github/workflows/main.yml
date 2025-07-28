@@ -141,6 +141,7 @@ jobs:
       WINDOWS_BASEKIT_URL: https://registrationcenter-download.intel.com/akdlm/IRC_NAS/7cd9bba0-7aab-4e30-b3ae-2221006a4a05/intel-oneapi-base-toolkit-2025.1.1.34_offline.exe
       WINDOWS_DPCPP_MKL: intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel:intel.oneapi.win.dnnl:intel.oneapi.win.tbb.devel
       ONEAPI_ROOT: "C:/Program Files (x86)/Intel/oneAPI"
+      CUDA_VERSION: '12.4'
 
     steps:
 
@@ -224,13 +225,13 @@ jobs:
         with:
           path: |
             C:\Program Files\NVIDIA GPU Computing Toolkit
-          key: cuda-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-12.4
+          key: cuda-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ env.CUDA_VERSION }}
 
       - name: windows install cuda
         if: matrix.name == 'windows-cuda' && steps.cache-cuda.outputs.cache-hit != 'true'
         uses: ./modules/llama.cpp/.github/actions/windows-setup-cuda
         with:
-          cuda_version: '12.4'
+          cuda_version: ${{ env.CUDA_VERSION }}
 
       - name: cache hip toolkit
         if: matrix.name == 'windows-hip'
@@ -323,7 +324,7 @@ jobs:
           key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}
 
       - name: build llama.cpp (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-sycl') && steps.cache-llama.outputs.cache-hit != 'true'
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-llama.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -352,7 +353,7 @@ jobs:
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-sycl') && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -377,7 +378,7 @@ jobs:
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-sycl') && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -402,7 +403,7 @@ jobs:
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai with cuda (msvc)
-        if: false #matrix.name == 'windows-cuda'
+        if: matrix.name == 'windows-cuda'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -412,7 +413,7 @@ jobs:
           make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai with hip (clang)
-        if: false #matrix.name == 'windows-hip'
+        if: matrix.name == 'windows-hip'
         shell: cmd
         run: |
           set PATH=%HIP_PATH%\bin;%PATH%
@@ -492,7 +493,7 @@ jobs:
             adb shell "sh /data/local/tmp/commands.sh"
 
       - name: windows test sqlite-ai (msvc)
-        if: false #matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl'
+        if: matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
