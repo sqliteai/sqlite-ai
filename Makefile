@@ -123,7 +123,7 @@ ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
 	ifeq ($(USE_MSVC),1)
 		LDFLAGS += /DLL
-		MSVC_LIBS += bcrypt.lib
+		MSVC_LIBS += bcrypt.lib ucrt.lib msvcrt.lib legacy_stdio_definitions.lib
 		DEF_FILE := $(BUILD_DIR)/ai.def
 		STRIP = echo "No stripping needed for MSVC"
 	else
