@@ -295,9 +295,9 @@ jobs:
           "PATH=$env:PATH;$($HIP_PWSH.Replace('\', '/'))/bin" | Out-File -FilePath $env:GITHUB_ENV -Append
         shell: pwsh
 
-      - name: windows install ninja for cuda, hip, and sycl
+      - name: windows install ninja and sqlite for cuda, hip, and sycl
         if: matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl'
-        run: choco install ninja
+        run: choco install ninja sqlite -y
         shell: pwsh
 
       - name: cache intel oneapi toolkit
