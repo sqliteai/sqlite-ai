@@ -108,7 +108,7 @@ jobs:
           - os: windows-latest
             arch: x86_64
             name: windows-hip
-            make: LLAMA="-G \"Ninja\" -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"%HIP_PATH%/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"%HIP_PATH%/bin/clang++.exe\" -DROCWMMA_PATH=\"./rocwmma\" -DCMAKE_INCLUDE_PATH=\"./rocwmma/library/include\" -DCMAKE_CXX_FLAGS=\"-I./rocwmma/library/include/ -Wno-ignored-attributes -Wno-nested-anon-types\""
+            make: LLAMA="-G \"Ninja\" -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"%HIP_PATH%/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"%HIP_PATH%/bin/clang++.exe\" -DCMAKE_CXX_FLAGS=\"-I./rocwmma/library/include/ -Wno-ignored-attributes -Wno-nested-anon-types\""
           - os: windows-latest
             arch: x86_64
             name: windows-sycl
@@ -323,7 +323,7 @@ jobs:
           key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}
 
       - name: build llama.cpp (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-llama.outputs.cache-hit != 'true'
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-sycl') && steps.cache-llama.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -352,7 +352,7 @@ jobs:
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-sycl') && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -377,7 +377,7 @@ jobs:
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-sycl') && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
