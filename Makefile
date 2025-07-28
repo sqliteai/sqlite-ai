@@ -122,7 +122,7 @@ endif
 ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
 	ifeq ($(USE_MSVC),1)
-		LDFLAGS += /DLL
+		LDFLAGS += /DLL /NODEFAULTLIB:LIBCMT
 		MSVC_LIBS += bcrypt.lib ucrt.lib msvcrt.lib legacy_stdio_definitions.lib
 		DEF_FILE := $(BUILD_DIR)/ai.def
 		STRIP = echo "No stripping needed for MSVC"
@@ -243,7 +243,7 @@ ifneq (,$(findstring CUDA,$(LLAMA)))
 		ifeq ($(USE_MSVC),1)
 			# MSVC CUDA build - use .lib files and MSVC linker syntax
 			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/Release/ggml-cuda.lib
-			MSVC_LIBS += "$(subst \,/,$(CUDA_PATH))/lib/x64/cuda.lib" "$(subst \,/,$(CUDA_PATH))/lib/x64/cudart.lib"
+			MSVC_LIBS += "$(subst \,/,$(CUDA_PATH))/lib/x64/cuda.lib" "$(subst \,/,$(CUDA_PATH))/lib/x64/cudart.lib" "$(subst \,/,$(CUDA_PATH))/lib/x64/cublas.lib" "$(subst \,/,$(CUDA_PATH))/lib/x64/cublasLt.lib"
 		else
 			# MinGW CUDA build - use original approach
 			LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common/Release -L./$(BUILD_LLAMA)/ggml/src/Release -L./$(BUILD_LLAMA)/src/Release -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda/Release -L"$(CUDA_PATH)/lib/x64" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-cuda.lib -lcuda -lcudart
