@@ -285,7 +285,7 @@ $(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LI
 ifeq ($(USE_MSVC),1)
 	@echo "CUDA_PATH = $(CUDA_PATH)"
 	@echo "MSVC_LIBS = $(MSVC_LIBS)"
-	@echo /nologo $(LDFLAGS) /DEF:$(DEF_FILE) /OUT:$@ $(OBJ_FILES) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(MSVC_LIBS) > $(BUILD_DIR)/link.rsp
+	@printf '/nologo %s /DEF:%s /OUT:%s %s %s %s %s %s\n' '$(LDFLAGS)' '$(DEF_FILE)' '$@' '$(OBJ_FILES)' '$(LLAMA_LIBS)' '$(WHISPER_LIBS)' '$(MINIAUDIO_LIBS)' '$(MSVC_LIBS)' > $(BUILD_DIR)/link.rsp
 	@echo "Response file contents:"
 	@cat $(BUILD_DIR)/link.rsp
 	"$(VCToolsInstallDir)bin\Hostx64\x64\link.exe" @$(BUILD_DIR)/link.rsp
