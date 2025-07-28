@@ -336,7 +336,7 @@ else
 endif
 
 test: $(TARGET)
-	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
+	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./$<" "SELECT ai_version();"
 
 # Build submodules
 ifeq ($(PLATFORM),windows)
