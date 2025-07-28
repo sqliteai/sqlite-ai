@@ -137,6 +137,11 @@ jobs:
       run:
         shell: bash
 
+    env:
+      WINDOWS_BASEKIT_URL: https://registrationcenter-download.intel.com/akdlm/IRC_NAS/7cd9bba0-7aab-4e30-b3ae-2221006a4a05/intel-oneapi-base-toolkit-2025.1.1.34_offline.exe
+      WINDOWS_DPCPP_MKL: intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel:intel.oneapi.win.dnnl:intel.oneapi.win.tbb.devel
+      ONEAPI_ROOT: "C:/Program Files (x86)/Intel/oneAPI"
+
     steps:
 
       - uses: actions/checkout@v4.2.2
@@ -268,24 +273,7 @@ jobs:
 
       - name: windows install intel oneapi toolkit for sycl
         if: matrix.name == 'windows-sycl'
-        run: |
-          $WINDOWS_BASEKIT_URL = "https://registrationcenter-download.intel.com/akdlm/IRC_NAS/7dff44ba-e3af-4448-841c-0d616c8da6e7/w_BaseKit_p_2024.1.0.595_offline.exe"
-          $WINDOWS_DPCPP_MKL = "intel.oneapi.win.cpp-dpcpp-common,intel.oneapi.win.mkl.devel"
-          $ONEAPI_ROOT = "C:/Program Files (x86)/Intel/oneAPI"
-          
-          # Download Intel OneAPI Base Toolkit
-          Write-Host "Downloading Intel OneAPI Base Toolkit..."
-          Invoke-WebRequest -Uri $WINDOWS_BASEKIT_URL -OutFile "$env:RUNNER_TEMP\oneapi-installer.exe"
-          
-          # Install specific components
-          Write-Host "Installing Intel OneAPI components: $WINDOWS_DPCPP_MKL"
-          Start-Process "$env:RUNNER_TEMP\oneapi-installer.exe" -ArgumentList "--silent", "--eula", "accept", "--components", $WINDOWS_DPCPP_MKL -NoNewWindow -Wait
-          
-          # Set environment variables
-          "ONEAPI_ROOT=$ONEAPI_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
-          
-          Write-Host "Intel OneAPI installation completed"
-        shell: pwsh
+        run: modules/llama.cpp/scripts/install-oneapi.bat $WINDOWS_BASEKIT_URL $WINDOWS_DPCPP_MKL
 
       - name: calculate cache version hashes for modules and dependencies
         id: submodule-hashes
@@ -340,8 +328,15 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           if "${{ matrix.name }}" == "windows-sycl" (
-            call "%ONEAPI_ROOT%\setvars.bat"
+            if exist "%ONEAPI_ROOT%\setvars.bat" (
+              call "%ONEAPI_ROOT%\setvars.bat"
+            ) else (
+              echo OneAPI setvars.bat not found at %ONEAPI_ROOT%\setvars.bat
+              dir "%ONEAPI_ROOT%"
+            )
             where icx
+            where dpcpp
+            echo PATH=%PATH%
           )
           set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
           set PATH=%PATH:C:\msys64\mingw64\bin;=%
@@ -362,8 +357,11 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           if "${{ matrix.name }}" == "windows-sycl" (
-            call "%ONEAPI_ROOT%\setvars.bat"
+            if exist "%ONEAPI_ROOT%\setvars.bat" (
+              call "%ONEAPI_ROOT%\setvars.bat"
+            )
             where icx
+            where dpcpp
           )
           set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
           set PATH=%PATH:C:\msys64\mingw64\bin;=%
@@ -384,8 +382,11 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           if "${{ matrix.name }}" == "windows-sycl" (
-            call "%ONEAPI_ROOT%\setvars.bat"
+            if exist "%ONEAPI_ROOT%\setvars.bat" (
+              call "%ONEAPI_ROOT%\setvars.bat"
+            )
             where icx
+            where dpcpp
           )
           set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
           set PATH=%PATH:C:\msys64\mingw64\bin;=%
@@ -426,7 +427,9 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          call "%ONEAPI_ROOT%\setvars.bat"
+          if exist "%ONEAPI_ROOT%\setvars.bat" (
+            call "%ONEAPI_ROOT%\setvars.bat"
+          )
           where icx
           where dpcpp
           set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
