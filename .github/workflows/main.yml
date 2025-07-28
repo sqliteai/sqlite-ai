@@ -253,7 +253,7 @@ jobs:
         run: choco install ninja
         shell: pwsh
 
-      - name: get submodule commit hashes for cache keys
+      - name: calculate cache version hashes for modules and dependencies
         id: submodule-hashes
         run: |
           LLAMA_HASH=$(git -C modules/llama.cpp rev-parse HEAD)
