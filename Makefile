@@ -283,6 +283,19 @@ all: $(TARGET)
 # Loadable library
 $(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
 ifeq ($(USE_MSVC),1)
+	@echo "Checking build directories:"
+	@if [ -d "$(BUILD_LLAMA)" ]; then echo "✓ $(BUILD_LLAMA) exists"; else echo "✗ $(BUILD_LLAMA) missing"; fi
+	@if [ -d "$(BUILD_LLAMA)/ggml/src/Release" ]; then echo "✓ GGML Release dir exists"; else echo "✗ GGML Release dir missing"; fi
+	@echo "Contents of $(BUILD_LLAMA)/ggml/src/Release:"
+	@ls -la "$(BUILD_LLAMA)/ggml/src/Release/" || echo "Directory not found"
+	@echo "Checking for required library files:"
+	@for lib in $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS); do \
+		if [ -f "$$lib" ]; then \
+			echo "✓ Found: $$lib"; \
+		else \
+			echo "✗ Missing: $$lib"; \
+		fi; \
+	done
 	@echo /nologo $(LDFLAGS) /DEF:$(DEF_FILE) /OUT:$@ $(OBJ_FILES) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(MSVC_LIBS) > $(BUILD_DIR)/link.rsp
 	"$(VCToolsInstallDir)bin\Hostx64\x64\link.exe" @$(BUILD_DIR)/link.rsp
 else
