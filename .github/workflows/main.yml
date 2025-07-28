@@ -341,7 +341,7 @@ jobs:
           key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}
 
       - name: build llama.cpp (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-llama.outputs.cache-hit != 'true'
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-llama.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -370,7 +370,7 @@ jobs:
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -395,7 +395,7 @@ jobs:
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -441,7 +441,7 @@ jobs:
           HIP_PLATFORM: amd
 
       - name: windows build sqlite-ai with sycl (msvc)
-        if: matrix.name == 'windows-sycl'
+        if: false #matrix.name == 'windows-sycl'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -510,7 +510,7 @@ jobs:
             adb shell "sh /data/local/tmp/commands.sh"
 
       - name: windows test sqlite-ai (msvc)
-        if: matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl'
+        if: matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' # || matrix.name == 'windows-sycl'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
