@@ -262,6 +262,10 @@ ifneq (,$(findstring HIP,$(LLAMA)))
 		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/ggml-hip.lib
 		ifeq ($(USE_HIP_CLANG),1)
 			# HIP Clang linker flags for .lib files
+			WHISPER_LDFLAGS =
+			#-L./$(BUILD_WHISPER)/src/Release -lwhisper
+			MINIAUDIO_LDFLAGS =
+			#-L./$(BUILD_MINIAUDIO)/Release -lminiaudio
 			LLAMA_LDFLAGS += -L"$(HIP_PATH)/lib" -lamdhip64 -lrocblas
 		else
 			# MinGW linker flags (should not be used for HIP)
