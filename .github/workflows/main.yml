@@ -356,8 +356,9 @@ jobs:
             where dpcpp
             echo PATH=%PATH%
           )
-          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
-          set PATH=%PATH:C:\msys64\mingw64\bin;=%
+          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
+          set "PATH=%PATH:C:\msys64\usr\bin;=%"
+          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
           make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build llama.cpp (mingw/windows)
@@ -381,8 +382,9 @@ jobs:
             where icx
             where dpcpp
           )
-          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
-          set PATH=%PATH:C:\msys64\mingw64\bin;=%
+          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
+          set "PATH=%PATH:C:\msys64\usr\bin;=%"
+          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
           make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (mingw/windows)
@@ -406,8 +408,9 @@ jobs:
             where icx
             where dpcpp
           )
-          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
-          set PATH=%PATH:C:\msys64\mingw64\bin;=%
+          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
+          set "PATH=%PATH:C:\msys64\usr\bin;=%"
+          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
           make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (mingw/windows)
@@ -424,8 +427,9 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
-          set PATH=%PATH:C:\msys64\mingw64\bin;=%
+          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
+          set "PATH=%PATH:C:\msys64\usr\bin;=%"
+          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
           where link
           make extension ${{ matrix.make && matrix.make || ''}}
 
@@ -450,8 +454,9 @@ jobs:
           )
           where icx
           where dpcpp
-          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
-          set PATH=%PATH:C:\msys64\mingw64\bin;=%
+          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
+          set "PATH=%PATH:C:\msys64\usr\bin;=%"
+          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
           make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai (mingw)
@@ -515,8 +520,13 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           if "${{ matrix.name }}" == "windows-sycl" (
-            call "%ONEAPI_ROOT%\setvars.bat"
+            if exist "%ONEAPI_ROOT%\setvars.bat" (
+              call "%ONEAPI_ROOT%\setvars.bat"
+            )
           )
+          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
+          set "PATH=%PATH:C:\msys64\usr\bin;=%"
+          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
           make test ${{ matrix.make && matrix.make || ''}}
 
       - name: windows test sqlite-ai (mingw)

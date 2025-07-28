@@ -229,7 +229,7 @@ ifneq (,$(findstring CUDA,$(LLAMA)))
 		ifeq ($(USE_MSVC),1)
 			# MSVC CUDA build - use .lib files and MSVC linker syntax
 			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/Release/ggml-cuda.lib
-			MSVC_LIBS += "$(CUDA_PATH)/lib/x64/cuda.lib" "$(CUDA_PATH)/lib/x64/cudart.lib"
+			MSVC_LIBS += "$(CUDA_PATH)\lib\x64\cuda.lib" "$(CUDA_PATH)\lib\x64\cudart.lib"
 		else
 			# MinGW CUDA build - use original approach
 			LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common/Release -L./$(BUILD_LLAMA)/ggml/src/Release -L./$(BUILD_LLAMA)/src/Release -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda/Release -L"$(CUDA_PATH)/lib/x64" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-cuda.lib -lcuda -lcudart
@@ -283,7 +283,9 @@ all: $(TARGET)
 # Loadable library
 $(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
 ifeq ($(USE_MSVC),1)
-	link.exe /nologo $(LDFLAGS) /OUT:$@ $(OBJ_FILES) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(MSVC_LIBS)
+	which link
+	which link.exe
+	link.exe /nologo $(LDFLAGS) /DEF:$(DEF_FILE) /OUT:$@ $(OBJ_FILES) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(MSVC_LIBS)
 else
 	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
