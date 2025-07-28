@@ -332,6 +332,7 @@ jobs:
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           if "${{ matrix.name }}" == "windows-sycl" (
             call "%ONEAPI_ROOT%\setvars.bat"
+            where icx
           )
           set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
           set PATH=%PATH:C:\msys64\mingw64\bin;=%
@@ -353,6 +354,7 @@ jobs:
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           if "${{ matrix.name }}" == "windows-sycl" (
             call "%ONEAPI_ROOT%\setvars.bat"
+            where icx
           )
           set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
           set PATH=%PATH:C:\msys64\mingw64\bin;=%
@@ -374,6 +376,7 @@ jobs:
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           if "${{ matrix.name }}" == "windows-sycl" (
             call "%ONEAPI_ROOT%\setvars.bat"
+            where icx
           )
           set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
           set PATH=%PATH:C:\msys64\mingw64\bin;=%
@@ -415,6 +418,8 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           call "%ONEAPI_ROOT%\setvars.bat"
+          where icx
+          where dpcpp
           set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
           set PATH=%PATH:C:\msys64\mingw64\bin;=%
           make extension ${{ matrix.make && matrix.make || ''}}

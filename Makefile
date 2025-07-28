@@ -38,8 +38,11 @@ BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 
 # Compiler and flags
 ifeq ($(PLATFORM),windows)
-	# Check if this is a CUDA build that needs MSVC
+	# Check if this is a CUDA or SYCL build that needs MSVC
 	ifneq (,$(findstring CUDA,$(LLAMA)))
+		USE_MSVC = 1
+	endif
+	ifneq (,$(findstring SYCL,$(LLAMA)))
 		USE_MSVC = 1
 	endif
 	# HIP builds use their own Clang compiler, not MSVC
@@ -244,6 +247,21 @@ ifneq (,$(findstring HIP,$(LLAMA)))
 		# Windows HIP build - use MinGW-style linking with .lib files
 		LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip/Release -L"$(HIP_PATH)/lib" -lggml-hip -lamdhip64 -lrocblas
 		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/Release/ggml-hip.lib
+	endif
+endif
+ifneq (,$(findstring SYCL,$(LLAMA)))
+	ifneq ($(PLATFORM),windows)
+		LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-sycl $(L)ggml-sycl$(A) -lsycl -ldl
+		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-sycl/libggml-sycl.a
+	else
+		# Windows SYCL build - use MSVC linking with .lib files
+		ifeq ($(USE_MSVC),1)
+			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-sycl/Release/ggml-sycl.lib
+			MSVC_LIBS += sycl.lib
+		else
+			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-sycl/Release -lggml-sycl -lsycl
+			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-sycl/Release/ggml-sycl.lib
+		endif
 	endif
 endif
 
