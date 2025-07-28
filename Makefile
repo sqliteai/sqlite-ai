@@ -283,9 +283,7 @@ all: $(TARGET)
 # Loadable library
 $(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
 ifeq ($(USE_MSVC),1)
-	which link
-	which link.exe
-	link.exe /nologo $(LDFLAGS) /DEF:$(DEF_FILE) /OUT:$@ $(OBJ_FILES) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(MSVC_LIBS)
+	"$(VCToolsInstallDir)bin\Hostx64\x64\link.exe" /nologo $(LDFLAGS) /DEF:$(DEF_FILE) /OUT:$@ $(OBJ_FILES) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(MSVC_LIBS)
 else
 	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
