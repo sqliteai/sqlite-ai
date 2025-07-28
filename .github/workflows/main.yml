@@ -259,9 +259,11 @@ jobs:
           LLAMA_HASH=$(git -C modules/llama.cpp rev-parse HEAD)
           WHISPER_HASH=$(git -C modules/whisper.cpp rev-parse HEAD)
           MINIAUDIO_HASH=$(git -C modules/miniaudio rev-parse HEAD)
+          MAKE_HASH=$(echo "${{ matrix.make && matrix.make || '' }}" | sha256sum | cut -d' ' -f1)
           echo "llama=$LLAMA_HASH" >> $GITHUB_OUTPUT
           echo "whisper=$WHISPER_HASH" >> $GITHUB_OUTPUT
           echo "miniaudio=$MINIAUDIO_HASH" >> $GITHUB_OUTPUT
+          echo "make=$MAKE_HASH" >> $GITHUB_OUTPUT
 
       - name: cache llama.cpp build
         id: cache-llama
@@ -270,7 +272,7 @@ jobs:
           path: |
             build/llama.cpp
             build/llama.cpp.stamp
-          key: llama-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.llama }}-${{ hashFiles('modules/llama.cpp/**') }}-${{ matrix.make }}
+          key: llama-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.llama }}-${{ hashFiles('modules/llama.cpp/**') }}-${{ steps.submodule-hashes.outputs.make }}
 
       - name: cache whisper.cpp build
         id: cache-whisper
@@ -279,7 +281,7 @@ jobs:
           path: |
             build/whisper.cpp
             build/whisper.cpp.stamp
-          key: whisper-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.whisper }}-${{ hashFiles('modules/whisper.cpp/**') }}-${{ matrix.make }}
+          key: whisper-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.whisper }}-${{ hashFiles('modules/whisper.cpp/**') }}-${{ steps.submodule-hashes.outputs.make }}
 
       - name: cache miniaudio build
         id: cache-miniaudio
@@ -288,7 +290,7 @@ jobs:
           path: |
             build/miniaudio
             build/miniaudio.stamp
-          key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ matrix.make }}
+          key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}
 
       - name: build llama.cpp (msvc)
         if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-llama.outputs.cache-hit != 'true'
