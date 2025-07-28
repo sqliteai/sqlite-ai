@@ -108,7 +108,7 @@ jobs:
           - os: windows-latest
             arch: x86_64
             name: windows-hip
-            make: LLAMA="-G \"Ninja\" -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"%HIP_PATH%/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"%HIP_PATH%/bin/clang++.exe\" -DCMAKE_CXX_FLAGS=\"-I./rocwmma/library/include/ -Wno-ignored-attributes -Wno-nested-anon-types\""
+            make: LLAMA="-G \"Ninja\" -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"%HIP_PATH%/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"%HIP_PATH%/bin/clang++.exe\" -DROCWMMA_PATH=\"./rocwmma\" -DCMAKE_INCLUDE_PATH=\"./rocwmma/library/include\" -DCMAKE_CXX_FLAGS=\"-I./rocwmma/library/include/ -Wno-ignored-attributes -Wno-nested-anon-types\""
           
           # Android builds
           - os: ubuntu-latest
@@ -226,7 +226,9 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%PATH%
+          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
+          set PATH=%PATH:C:\msys64\mingw64\bin;=%
+          where link
           make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: cache hip toolkit
