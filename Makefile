@@ -57,8 +57,8 @@ ifeq ($(PLATFORM),windows)
 		OBJ_EXT = .obj
 		LIB_EXT = .lib
 	else ifeq ($(USE_HIP_CLANG),1)
-		CC = $(HIP_PATH)/bin/clang.exe
-		CXX = $(HIP_PATH)/bin/clang++.exe
+		CC = "$(HIP_PATH)/bin/clang.exe"
+		CXX = "$(HIP_PATH)/bin/clang++.exe"
 		CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
 		OBJ_EXT = .o
 		LIB_EXT = .lib
