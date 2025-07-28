@@ -325,6 +325,8 @@ endif
 $(BUILD_DIR)/%$(OBJ_EXT): %.c
 ifeq ($(USE_MSVC),1)
 	$(CC) $(CFLAGS) /O2 /c $< /Fo:$@
+else ifeq ($(USE_HIP_CLANG),1)
+	$(CC) $(CFLAGS) -O3 -c $< -o $@
 else
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
 endif
