@@ -149,6 +149,34 @@ jobs:
         with:
           submodules: true
 
+      - name: calculate cache version hashes for modules and dependencies
+        id: submodule-hashes
+        env:
+          MATRIX_MAKE: ${{ matrix.make && matrix.make || '' }}
+        run: |
+          LLAMA_HASH=$(git -C modules/llama.cpp rev-parse HEAD)
+          WHISPER_HASH=$(git -C modules/whisper.cpp rev-parse HEAD)
+          MINIAUDIO_HASH=$(git -C modules/miniaudio rev-parse HEAD)
+          if command -v sha256sum >/dev/null 2>&1; then
+            MAKE_HASH=$(echo "$MATRIX_MAKE" | sha256sum | cut -d' ' -f1)
+            DPCPP_MKL_HASH=$(echo "$WINDOWS_DPCPP_MKL" | sha256sum | cut -d' ' -f1)
+            BASEKIT_URL_HASH=$(echo "$WINDOWS_BASEKIT_URL" | sha256sum | cut -d' ' -f1)
+          elif command -v shasum >/dev/null 2>&1; then
+            MAKE_HASH=$(echo "$MATRIX_MAKE" | shasum -a 256 | cut -d' ' -f1)
+            DPCPP_MKL_HASH=$(echo "$WINDOWS_DPCPP_MKL" | shasum -a 256 | cut -d' ' -f1)
+            BASEKIT_URL_HASH=$(echo "$WINDOWS_BASEKIT_URL" | shasum -a 256 | cut -d' ' -f1)
+          else
+            MAKE_HASH=$(echo "$MATRIX_MAKE" | openssl dgst -sha256 | cut -d' ' -f2)
+            DPCPP_MKL_HASH=$(echo "$WINDOWS_DPCPP_MKL" | openssl dgst -sha256 | cut -d' ' -f2)
+            BASEKIT_URL_HASH=$(echo "$WINDOWS_BASEKIT_URL" | openssl dgst -sha256 | cut -d' ' -f2)
+          fi
+          echo "llama=$LLAMA_HASH" >> $GITHUB_OUTPUT
+          echo "whisper=$WHISPER_HASH" >> $GITHUB_OUTPUT
+          echo "miniaudio=$MINIAUDIO_HASH" >> $GITHUB_OUTPUT
+          echo "make=$MAKE_HASH" >> $GITHUB_OUTPUT
+          echo "dpcpp-mkl=$DPCPP_MKL_HASH" >> $GITHUB_OUTPUT
+          echo "basekit-url=$BASEKIT_URL_HASH" >> $GITHUB_OUTPUT
+
       - uses: msys2/setup-msys2@v2.27.0
         if: matrix.os == 'windows-latest'
         with:
@@ -272,29 +300,18 @@ jobs:
         run: choco install ninja
         shell: pwsh
 
-      - name: windows install intel oneapi toolkit for sycl
+      - name: cache intel oneapi toolkit
         if: matrix.name == 'windows-sycl'
-        run: modules/llama.cpp/scripts/install-oneapi.bat $WINDOWS_BASEKIT_URL $WINDOWS_DPCPP_MKL
+        id: cache-oneapi
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\Program Files (x86)\Intel\oneAPI
+          key: oneapi-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.dpcpp-mkl }}-${{ steps.submodule-hashes.outputs.basekit-url }}
 
-      - name: calculate cache version hashes for modules and dependencies
-        id: submodule-hashes
-        env:
-          MATRIX_MAKE: ${{ matrix.make && matrix.make || '' }}
-        run: |
-          LLAMA_HASH=$(git -C modules/llama.cpp rev-parse HEAD)
-          WHISPER_HASH=$(git -C modules/whisper.cpp rev-parse HEAD)
-          MINIAUDIO_HASH=$(git -C modules/miniaudio rev-parse HEAD)
-          if command -v sha256sum >/dev/null 2>&1; then
-            MAKE_HASH=$(echo "$MATRIX_MAKE" | sha256sum | cut -d' ' -f1)
-          elif command -v shasum >/dev/null 2>&1; then
-            MAKE_HASH=$(echo "$MATRIX_MAKE" | shasum -a 256 | cut -d' ' -f1)
-          else
-            MAKE_HASH=$(echo "$MATRIX_MAKE" | openssl dgst -sha256 | cut -d' ' -f2)
-          fi
-          echo "llama=$LLAMA_HASH" >> $GITHUB_OUTPUT
-          echo "whisper=$WHISPER_HASH" >> $GITHUB_OUTPUT
-          echo "miniaudio=$MINIAUDIO_HASH" >> $GITHUB_OUTPUT
-          echo "make=$MAKE_HASH" >> $GITHUB_OUTPUT
+      - name: windows install intel oneapi toolkit for sycl
+        if: matrix.name == 'windows-sycl' && steps.cache-oneapi.outputs.cache-hit != 'true'
+        run: modules/llama.cpp/scripts/install-oneapi.bat $WINDOWS_BASEKIT_URL $WINDOWS_DPCPP_MKL
 
       - name: cache llama.cpp build
         id: cache-llama
