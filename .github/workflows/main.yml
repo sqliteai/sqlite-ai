@@ -158,13 +158,11 @@ jobs:
           
       - name: linux install openblas
         if: matrix.name == 'linux-openblas'
-        run: |
-          sudo apt-get install -y libopenblas-dev
+        run: sudo apt-get install -y libopenblas-dev
           
       - name: linux install opencl
         if: matrix.name == 'linux-opencl'
-        run: |
-          sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
+        run: sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
 
       - name: linux-x86_64 install vulkan
         if: matrix.name == 'linux-vulkan' && matrix.arch == 'x86_64'
@@ -216,21 +214,6 @@ jobs:
         with:
           cuda_version: '12.4'
 
-      - name: windows install ninja for cuda and hip
-        if: matrix.name == 'windows-cuda' || matrix.name == 'windows-hip'
-        run: choco install ninja
-        shell: pwsh
-
-      - name: windows build sqlite-ai with cuda (msvc)
-        if: matrix.name == 'windows-cuda'
-        shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
-          set PATH=%PATH:C:\msys64\mingw64\bin;=%
-          where link
-          make extension ${{ matrix.make && matrix.make || ''}}
-
       - name: cache hip toolkit
         if: matrix.name == 'windows-hip'
         id: cache-hip
@@ -264,6 +247,112 @@ jobs:
           # Ensure hip-config.cmake can find hipconfig
           "PATH=$env:PATH;$($HIP_PWSH.Replace('\', '/'))/bin" | Out-File -FilePath $env:GITHUB_ENV -Append
         shell: pwsh
+
+      - name: windows install ninja for cuda and hip
+        if: matrix.name == 'windows-cuda' || matrix.name == 'windows-hip'
+        run: choco install ninja
+        shell: pwsh
+
+      - name: get submodule commit hashes for cache keys
+        id: submodule-hashes
+        run: |
+          LLAMA_HASH=$(git -C modules/llama.cpp rev-parse HEAD)
+          WHISPER_HASH=$(git -C modules/whisper.cpp rev-parse HEAD)
+          MINIAUDIO_HASH=$(git -C modules/miniaudio rev-parse HEAD)
+          echo "llama=$LLAMA_HASH" >> $GITHUB_OUTPUT
+          echo "whisper=$WHISPER_HASH" >> $GITHUB_OUTPUT
+          echo "miniaudio=$MINIAUDIO_HASH" >> $GITHUB_OUTPUT
+
+      - name: cache llama.cpp build
+        id: cache-llama
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/llama.cpp
+            build/llama.cpp.stamp
+          key: llama-${{ matrix.name }}-${{ steps.submodule-hashes.outputs.llama }}-${{ hashFiles('modules/llama.cpp/**') }}-${{ matrix.make }}
+
+      - name: cache whisper.cpp build
+        id: cache-whisper
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/whisper.cpp
+            build/whisper.cpp.stamp
+          key: whisper-${{ matrix.name }}-${{ steps.submodule-hashes.outputs.whisper }}-${{ hashFiles('modules/whisper.cpp/**') }}-${{ matrix.make }}
+
+      - name: cache miniaudio build
+        id: cache-miniaudio
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/miniaudio
+            build/miniaudio.stamp
+          key: miniaudio-${{ matrix.name }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ matrix.make }}
+
+      - name: build llama.cpp (msvc)
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-llama.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
+          set PATH=%PATH:C:\msys64\mingw64\bin;=%
+          make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: build llama.cpp (mingw/windows)
+        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-cuda' && matrix.name != 'windows-hip' && steps.cache-llama.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: build llama.cpp (mingw/unix)
+        if: contains(matrix.os, 'windows-') == false && steps.cache-llama.outputs.cache-hit != 'true'
+        run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: build whisper.cpp (msvc)
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-whisper.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
+          set PATH=%PATH:C:\msys64\mingw64\bin;=%
+          make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: build whisper.cpp (mingw/windows)
+        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-cuda' && matrix.name != 'windows-hip' && steps.cache-llama.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: build whisper.cpp (mingw/unix)
+        if: contains(matrix.os, 'windows-') == false && steps.cache-llama.outputs.cache-hit != 'true'
+        run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: build miniaudio (msvc)
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
+          set PATH=%PATH:C:\msys64\mingw64\bin;=%
+          make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: build miniaudio (mingw/windows)
+        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-cuda' && matrix.name != 'windows-hip' && steps.cache-llama.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: build miniaudio (mingw/unix)
+        if: contains(matrix.os, 'windows-') == false && steps.cache-llama.outputs.cache-hit != 'true'
+        run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: windows build sqlite-ai with cuda (msvc)
+        if: matrix.name == 'windows-cuda'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH:C:\msys64\usr\bin;=%
+          set PATH=%PATH:C:\msys64\mingw64\bin;=%
+          where link
+          make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai with hip (clang)
         if: matrix.name == 'windows-hip'
