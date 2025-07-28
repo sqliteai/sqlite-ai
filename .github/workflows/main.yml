@@ -226,6 +226,7 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set PATH=%VCToolsInstallDir%bin\Hostx64\x64;%PATH%
           make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: cache hip toolkit
