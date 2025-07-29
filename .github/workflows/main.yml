@@ -340,25 +340,18 @@ jobs:
             build/miniaudio.stamp
           key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}
 
-      - name: build llama.cpp (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-llama.outputs.cache-hit != 'true'
+      - name: build llama.cpp (sycl/msvc)
+        if: matrix.name == 'windows-sycl' && steps.cache-llama.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
+          make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: build llama.cpp (cuda/hip/msvc)
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-llama.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          if "${{ matrix.name }}" == "windows-sycl" (
-            if exist "%ONEAPI_ROOT%\setvars.bat" (
-              call "%ONEAPI_ROOT%\setvars.bat"
-            ) else (
-              echo OneAPI setvars.bat not found at %ONEAPI_ROOT%\setvars.bat
-              if exist "%ONEAPI_ROOT%" (
-                dir "%ONEAPI_ROOT%"
-              ) else (
-                echo ONEAPI_ROOT directory does not exist: %ONEAPI_ROOT%
-              )
-            )
-            where icx 2^>nul ^|^| echo icx not found
-            where dpcpp 2^>nul ^|^| echo dpcpp not found
-          )
           set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
           set "PATH=%PATH:C:\msys64\usr\bin;=%"
           set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
@@ -373,18 +366,18 @@ jobs:
         if: contains(matrix.os, 'windows-') == false && steps.cache-llama.outputs.cache-hit != 'true'
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
-      - name: build whisper.cpp (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-whisper.outputs.cache-hit != 'true'
+      - name: build whisper.cpp (sycl/msvc)
+        if: matrix.name == 'windows-sycl' && steps.cache-whisper.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
+          make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: build whisper.cpp (cuda/hip/msvc)
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          if "${{ matrix.name }}" == "windows-sycl" (
-            if exist "%ONEAPI_ROOT%\setvars.bat" (
-              call "%ONEAPI_ROOT%\setvars.bat"
-            )
-            where icx
-            where dpcpp
-          )
           set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
           set "PATH=%PATH:C:\msys64\usr\bin;=%"
           set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
@@ -399,18 +392,18 @@ jobs:
         if: contains(matrix.os, 'windows-') == false && steps.cache-whisper.outputs.cache-hit != 'true'
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
-      - name: build miniaudio (msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl') && steps.cache-miniaudio.outputs.cache-hit != 'true'
+      - name: build miniaudio (sycl/msvc)
+        if: matrix.name == 'windows-sycl' && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
+          make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: build miniaudio (cuda/hip/msvc)
+        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          if "${{ matrix.name }}" == "windows-sycl" (
-            if exist "%ONEAPI_ROOT%\setvars.bat" (
-              call "%ONEAPI_ROOT%\setvars.bat"
-            )
-            where icx
-            where dpcpp
-          )
           set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
           set "PATH=%PATH:C:\msys64\usr\bin;=%"
           set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
@@ -457,15 +450,7 @@ jobs:
         if: matrix.name == 'windows-sycl'
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          if exist "%ONEAPI_ROOT%\setvars.bat" (
-            call "%ONEAPI_ROOT%\setvars.bat"
-          )
-          where icx
-          where dpcpp
-          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
-          set "PATH=%PATH:C:\msys64\usr\bin;=%"
-          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
+          call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
           make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai (mingw)
