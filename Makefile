@@ -44,6 +44,7 @@ ifeq ($(PLATFORM),windows)
 	endif
 	ifneq (,$(findstring SYCL,$(LLAMA)))
 		USE_MSVC = 1
+		IS_SYCL = 1
 	endif
 	# HIP builds use their own Clang compiler, not MSVC
 	ifneq (,$(findstring HIP,$(LLAMA)))
@@ -112,7 +113,11 @@ LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%$(OBJ_EXT), $(notdir $(SRC_FILES)))
 ifeq ($(USE_MSVC),1)
-	LLAMA_LIBS = $(BUILD_LLAMA)/common/Release/common.lib $(BUILD_LLAMA)/src/Release/llama.lib $(BUILD_LLAMA)/ggml/src/Release/ggml.lib $(BUILD_LLAMA)/ggml/src/Release/ggml-base.lib
+	ifeq ($(IS_SYCL),1)
+		LLAMA_LIBS = $(BUILD_LLAMA)/common/common.lib $(BUILD_LLAMA)/src/llama.lib $(BUILD_LLAMA)/ggml/src/ggml.lib $(BUILD_LLAMA)/ggml/src/ggml-base.lib
+	else
+		LLAMA_LIBS = $(BUILD_LLAMA)/common/Release/common.lib $(BUILD_LLAMA)/src/Release/llama.lib $(BUILD_LLAMA)/ggml/src/Release/ggml.lib $(BUILD_LLAMA)/ggml/src/Release/ggml-base.lib
+	endif
 	WHISPER_LIBS = $(BUILD_WHISPER)/src/Release/whisper.lib
 	MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/Release/miniaudio.lib
 else ifeq ($(USE_HIP_CLANG),1)
@@ -290,14 +295,9 @@ ifneq (,$(findstring SYCL,$(LLAMA)))
 		LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-sycl $(L)ggml-sycl$(A) -lsycl -ldl
 		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-sycl/libggml-sycl.a
 	else
-		# Windows SYCL build - use MSVC linking with .lib files
-		ifeq ($(USE_MSVC),1)
-			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-sycl/Release/ggml-sycl.lib
-			MSVC_LIBS += sycl.lib
-		else
-			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-sycl/Release -lggml-sycl -lsycl
-			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-sycl/Release/ggml-sycl.lib
-		endif
+		LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-sycl/ggml-sycl.lib
+		#LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-sycl -lggml-sycl -lsycl
+		MSVC_LIBS += sycl.lib
 	endif
 endif
 
