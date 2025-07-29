@@ -105,9 +105,9 @@ jobs:
             arch: x86_64
             name: windows-gpu
             make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON"
-            make-cuda: LLAMA="-G \"Ninja Multi-Config\" -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON -DGGML_HIP=ON -DGGML_SYCL=ON"
-            make-hip: LLAMA="-G \"Ninja\" -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"%HIP_PATH%/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"%HIP_PATH%/bin/clang++.exe\" -DCMAKE_CXX_FLAGS=\"-I../../rocwmma/library/include/ -Wno-ignored-attributes -Wno-nested-anon-types\""
-            make-sycl: LLAMA="-G \"Ninja\" -DGGML_BACKEND_DL=ON -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=icx -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_SYCL=ON"
+            make-cuda: LLAMA_ARGS="--target ggml-cuda" LLAMA="-G \"Ninja Multi-Config\" -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON -DGGML_HIP=ON -DGGML_SYCL=ON"
+            make-hip: LLAMA_ARGS="--target ggml-hip" LLAMA="-G \"Ninja\" -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"%HIP_PATH%/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"%HIP_PATH%/bin/clang++.exe\" -DCMAKE_CXX_FLAGS=\"-I../../rocwmma/library/include/ -Wno-ignored-attributes -Wno-nested-anon-types\""
+            make-sycl: LLAMA_ARGS="--target ggml-sycl" LLAMA="-G \"Ninja\" -DGGML_BACKEND_DL=ON -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=icx -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_SYCL=ON"
           
           # Android builds
           - os: ubuntu-latest
@@ -337,22 +337,42 @@ jobs:
             build/miniaudio.stamp
           key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}
 
-      - name: build llama.cpp (sycl/msvc)
-        if: false #matrix.name == 'windows-sycl' && steps.cache-llama.outputs.cache-hit != 'true'
+      - name: build ggml-sycl
+        if: matrix.name == 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
-          make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+          make build/llama.cpp.stamp ${{ matrix.make-sycl }}
 
-      - name: build llama.cpp (cuda/hip/msvc)
-        if: false #(matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-llama.outputs.cache-hit != 'true'
+      - name: build ggml-hip (msvc)
+        if: matrix.name == 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
           set "PATH=%PATH:C:\msys64\usr\bin;=%"
           set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
-          make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+          make build/llama.cpp.stamp ${{ matrix.make-hip }}
+
+      - name: build ggml-cuda (msvc)
+        if: matrix.name == 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
+          set "PATH=%PATH:C:\msys64\usr\bin;=%"
+          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
+          make build/llama.cpp.stamp ${{ matrix.make-cuda }}
+
+      - name: build llama.cpp (msvc)
+        if: false #matrix.name == 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
+          set "PATH=%PATH:C:\msys64\usr\bin;=%"
+          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
+          make build/llama.cpp.stamp ${{ matrix.make-cuda }}
 
       - name: build llama.cpp (mingw/windows)
         if: contains(matrix.os, 'windows-') && matrix.name != 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
