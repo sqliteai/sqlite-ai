@@ -521,6 +521,7 @@ jobs:
           script: |
             adb root
             adb remount
+            adb push ${{ github.workspace }}/commands.sh /data/local/tmp/
             adb push ${{ github.workspace }}/sqlite3 /data/local/tmp/
             adb push ${{ github.workspace }}/dist /data/local/tmp/
             adb push ${{ github.workspace }}/Makefile /data/local/tmp/
