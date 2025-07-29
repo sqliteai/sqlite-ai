@@ -128,7 +128,6 @@ ifeq ($(PLATFORM),windows)
 		STRIP = echo "No stripping needed for MSVC"
 	else ifeq ($(USE_HIP_CLANG),1)
 		LDFLAGS += -shared -lbcrypt
-		MSVC_LIBS += ucrt.lib msvcrt.lib legacy_stdio_definitions.lib
 		DEF_FILE := $(BUILD_DIR)/ai.def
 		STRIP = strip --strip-unneeded $@
 	else
@@ -319,7 +318,7 @@ ifeq ($(USE_MSVC),1)
 	@cat $(BUILD_DIR)/link.rsp
 	"$(VCToolsInstallDir)bin\Hostx64\x64\link.exe" @$(BUILD_DIR)/link.rsp
 else ifeq ($(USE_HIP_CLANG),1)
-	$(CXX) $(OBJ_FILES) -o $@ $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(LDFLAGS) $(MSVC_LIBS)
+	$(CXX) $(OBJ_FILES) -o $@ $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(LDFLAGS)
 else
 	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
