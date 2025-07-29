@@ -346,15 +346,18 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           if "${{ matrix.name }}" == "windows-sycl" (
-            if exist "%ONEAPI_ROOT%\\setvars.bat" (
-              call "%ONEAPI_ROOT%\\setvars.bat"
+            if exist "%ONEAPI_ROOT%\setvars.bat" (
+              call "%ONEAPI_ROOT%\setvars.bat"
             ) else (
-              echo OneAPI setvars.bat not found at "%ONEAPI_ROOT%\\setvars.bat"
-              dir "%ONEAPI_ROOT%"
+              echo OneAPI setvars.bat not found at %ONEAPI_ROOT%\setvars.bat
+              if exist "%ONEAPI_ROOT%" (
+                dir "%ONEAPI_ROOT%"
+              ) else (
+                echo ONEAPI_ROOT directory does not exist: %ONEAPI_ROOT%
+              )
             )
-            where icx
-            where dpcpp
-            echo PATH=%PATH%
+            where icx 2^>nul ^|^| echo icx not found
+            where dpcpp 2^>nul ^|^| echo dpcpp not found
           )
           set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
           set "PATH=%PATH:C:\msys64\usr\bin;=%"
