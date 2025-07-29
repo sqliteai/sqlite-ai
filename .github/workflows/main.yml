@@ -292,11 +292,6 @@ jobs:
           "PATH=$env:PATH;$($HIP_PWSH.Replace('\', '/'))/bin" | Out-File -FilePath $env:GITHUB_ENV -Append
         shell: pwsh
 
-      - name: windows-gpu install ninja and sqlite
-        if: matrix.name == 'windows-gpu'
-        run: choco install ninja sqlite -y
-        shell: pwsh
-
       - name: cache intel oneapi toolkit
         if: matrix.name == 'windows-gpu'
         id: cache-oneapi
@@ -309,6 +304,11 @@ jobs:
       - name: windows install intel oneapi toolkit for sycl
         if: matrix.name == 'windows-gpu' && steps.cache-oneapi.outputs.cache-hit != 'true'
         run: modules/llama.cpp/scripts/install-oneapi.bat $WINDOWS_BASEKIT_URL $WINDOWS_DPCPP_MKL
+
+      - name: windows-gpu install ninja and sqlite
+        if: matrix.name == 'windows-gpu'
+        run: choco install ninja sqlite -y
+        shell: pwsh
 
       - name: cache llama.cpp build
         id: cache-llama
@@ -384,14 +384,14 @@ jobs:
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (sycl/msvc)
-        if: false #matrix.name == 'windows-sycl' && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: false #matrix.name == 'windows-gpu' && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
           make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (cuda/hip/msvc)
-        if: false #(matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: false #matrix.name == 'windows-gpu' && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -410,14 +410,14 @@ jobs:
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (sycl/msvc)
-        if: false #matrix.name == 'windows-sycl' && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: false #matrix.name == 'windows-gpu' && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
           make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (cuda/hip/msvc)
-        if: false #(matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: false #matrix.name == 'windows-gpu' && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -436,7 +436,7 @@ jobs:
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai with cuda (msvc)
-        if: false #matrix.name == 'windows-cuda'
+        if: false #matrix.name == 'windows-gpu'
         shell: cmd
         run: |
           setlocal enabledelayedexpansion
@@ -453,7 +453,7 @@ jobs:
           make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai with hip (clang)
-        if: false #matrix.name == 'windows-hip'
+        if: false #matrix.name == 'windows-gpu'
         shell: cmd
         run: |
           set PATH=%HIP_PATH%\bin;%PATH%
@@ -464,7 +464,7 @@ jobs:
           HIP_PLATFORM: amd
 
       - name: windows build sqlite-ai with sycl (msvc)
-        if: false #matrix.name == 'windows-sycl'
+        if: false #matrix.name == 'windows-gpu'
         shell: cmd
         run: |
           call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
@@ -510,7 +510,6 @@ jobs:
             $(make test PLATFORM=$PLATFORM ARCH=$ARCH -n)
           EOF
           # remove big unused folders to avoid emulator errors
-          rm -rf build modules
           echo "::endgroup::"
 
       - name: android test sqlite-ai
@@ -522,11 +521,13 @@ jobs:
           script: |
             adb root
             adb remount
-            adb push ${{ github.workspace }}/. /data/local/tmp/
+            adb push ${{ github.workspace }}/sqlite3 /data/local/tmp/
+            adb push ${{ github.workspace }}/dist /data/local/tmp/
+            adb push ${{ github.workspace }}/Makefile /data/local/tmp/
             adb shell "sh /data/local/tmp/commands.sh"
 
       - name: windows test sqlite-ai (msvc)
-        if: false #matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl'
+        if: false #matrix.name == 'windows-gpu'
         shell: cmd
         run: |
           setlocal enabledelayedexpansion
