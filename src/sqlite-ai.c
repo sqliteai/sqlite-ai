@@ -668,6 +668,29 @@ static void llm_embed_generate (sqlite3_context *context, int argc, sqlite3_valu
     llm_embed_generate_run(context, text, text_len);
 }
 
+static void llm_token_count (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (llm_common_args_check(context, "llm_token_count", argc, argv, true) == false) return;
+    
+    const char *text = (const char *)sqlite3_value_text(argv[0]);
+    int32_t text_len = (int32_t)sqlite3_value_bytes(argv[0]);
+    if (!text || text_len == 0) return;
+    
+    // sanity check context
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (!ai->ctx) ai->ctx = ai_context_check(ai);
+    if (!ai->ctx) return;
+    
+    // sanity check vocab
+    const struct llama_vocab *vocab = llama_model_get_vocab(ai->model);
+    if (!vocab) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Failed to extract vocabulary from the model");
+        return;
+    }
+    
+    int32_t n_tokens = -llama_tokenize(vocab, text, text_len, NULL, 0, true, false);
+    sqlite3_result_int64(context, n_tokens);
+}
+
 // MARK: - Text Generation -
 
 static void llm_text_run (sqlite3_context *context, const char *text, int32_t text_len) {
@@ -2059,6 +2082,9 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_embed_generate", 2, SQLITE_UTF8, ctx, llm_embed_generate, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_token_count", 1, SQLITE_UTF8, ctx, llm_token_count, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_text_generate", 1, SQLITE_UTF8, ctx, llm_text_generate, NULL, NULL);
