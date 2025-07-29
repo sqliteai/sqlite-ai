@@ -128,6 +128,7 @@ ifeq ($(PLATFORM),windows)
 		STRIP = echo "No stripping needed for MSVC"
 	else ifeq ($(USE_HIP_CLANG),1)
 		LDFLAGS += -shared -lbcrypt
+		MSVC_LIBS += ucrt.lib msvcrt.lib legacy_stdio_definitions.lib
 		DEF_FILE := $(BUILD_DIR)/ai.def
 		STRIP = strip --strip-unneeded $@
 	else
@@ -270,7 +271,7 @@ ifneq (,$(findstring HIP,$(LLAMA)))
 			#-L./$(BUILD_WHISPER)/src/Release -lwhisper
 			MINIAUDIO_LDFLAGS =
 			#-L./$(BUILD_MINIAUDIO)/Release -lminiaudio
-			LLAMA_LDFLAGS = -L"$(HIP_PATH)/lib" -lamdhip64 -lrocblas
+			LLAMA_LDFLAGS = -L"$(HIP_PATH)/lib" -lamdhip64 -lrocblas -lhipblas
 		else
 			# MinGW linker flags (should not be used for HIP)
 			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip -L"$(HIP_PATH)/lib" -lggml-hip -lamdhip64 -lrocblas
@@ -318,7 +319,7 @@ ifeq ($(USE_MSVC),1)
 	@cat $(BUILD_DIR)/link.rsp
 	"$(VCToolsInstallDir)bin\Hostx64\x64\link.exe" @$(BUILD_DIR)/link.rsp
 else ifeq ($(USE_HIP_CLANG),1)
-	$(CXX) $(OBJ_FILES) -o $@ $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(LDFLAGS)
+	$(CXX) $(OBJ_FILES) -o $@ $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(LDFLAGS) $(MSVC_LIBS)
 else
 	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
