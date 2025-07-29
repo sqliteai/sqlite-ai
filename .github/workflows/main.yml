@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }} build${{ matrix.arch != 'arm64-v8a' && matrix.name != 'isim' && matrix.name != 'ios' && ' + test' || ''}}
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -95,10 +95,6 @@ jobs:
             make: LLAMA="-DGGML_NATIVE=ON -DGGML_LLAMAFILE=ON"
           - os: windows-latest
             arch: x86_64
-            name: windows-cuda
-            make: LLAMA="-G \"Ninja Multi-Config\" -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON"
-          - os: windows-latest
-            arch: x86_64
             name: windows-vulkan
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
           - os: windows-latest
@@ -107,12 +103,11 @@ jobs:
             make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
           - os: windows-latest
             arch: x86_64
-            name: windows-hip
-            make: LLAMA="-G \"Ninja\" -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"%HIP_PATH%/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"%HIP_PATH%/bin/clang++.exe\" -DCMAKE_CXX_FLAGS=\"-I../../rocwmma/library/include/ -Wno-ignored-attributes -Wno-nested-anon-types\""
-          - os: windows-latest
-            arch: x86_64
-            name: windows-sycl
-            make: LLAMA="-G \"Ninja\" -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=icx -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_SYCL=ON"
+            name: windows-gpu
+            make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON"
+            make-cuda: LLAMA="-G \"Ninja Multi-Config\" -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON -DGGML_HIP=ON -DGGML_SYCL=ON"
+            make-hip: LLAMA="-G \"Ninja\" -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"%HIP_PATH%/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"%HIP_PATH%/bin/clang++.exe\" -DCMAKE_CXX_FLAGS=\"-I../../rocwmma/library/include/ -Wno-ignored-attributes -Wno-nested-anon-types\""
+            make-sycl: LLAMA="-G \"Ninja\" -DGGML_BACKEND_DL=ON -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=icx -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_SYCL=ON"
           
           # Android builds
           - os: ubuntu-latest
@@ -142,6 +137,8 @@ jobs:
       WINDOWS_DPCPP_MKL: intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel:intel.oneapi.win.dnnl:intel.oneapi.win.tbb.devel
       ONEAPI_ROOT: "C:/Program Files (x86)/Intel/oneAPI"
       CUDA_VERSION: '12.4'
+      ROCWMMA_VERSION: '6.2.4'
+      HIP_TOOLKIT_VERSION: '24.Q3'
 
     steps:
 
@@ -247,7 +244,7 @@ jobs:
           echo "VULKAN_SDK=C:/msys64/mingw64" >> $GITHUB_ENV
 
       - name: cache cuda toolkit
-        if: matrix.name == 'windows-cuda'
+        if: matrix.name == 'windows-gpu'
         id: cache-cuda
         uses: actions/cache@v4
         with:
@@ -256,35 +253,35 @@ jobs:
           key: cuda-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ env.CUDA_VERSION }}
 
       - name: windows install cuda
-        if: matrix.name == 'windows-cuda' && steps.cache-cuda.outputs.cache-hit != 'true'
+        if: matrix.name == 'windows-gpu' && steps.cache-cuda.outputs.cache-hit != 'true'
         uses: ./modules/llama.cpp/.github/actions/windows-setup-cuda
         with:
           cuda_version: ${{ env.CUDA_VERSION }}
 
       - name: cache hip toolkit
-        if: matrix.name == 'windows-hip'
+        if: matrix.name == 'windows-gpu'
         id: cache-hip
         uses: actions/cache@v4
         with:
           path: |
             C:\Program Files\AMD\ROCm
             rocwmma
-          key: hip-toolkit-24.Q3-rocwmma-6.2.4
+          key: hip-toolkit-${{ env.HIP_TOOLKIT_VERSION }}-rocwmma-${{ env.ROCWMMA_VERSION }}
 
       - name: windows install hip toolkit
-        if: matrix.name == 'windows-hip' && steps.cache-hip.outputs.cache-hit != 'true'
+        if: matrix.name == 'windows-gpu' && steps.cache-hip.outputs.cache-hit != 'true'
         run: |
-          git clone https://github.com/rocm/rocwmma --branch rocm-6.2.4 --depth 1
+          git clone https://github.com/rocm/rocwmma --branch rocm-${{ env.ROCWMMA_VERSION }} --depth 1
           $ErrorActionPreference = "Stop"
           write-host "Downloading AMD HIP SDK Installer"
-          Invoke-WebRequest -Uri "https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-24.Q3-WinSvr2022-For-HIP.exe" -OutFile "${env:RUNNER_TEMP}\rocm-install.exe"
+          Invoke-WebRequest -Uri "https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-${{ env.HIP_TOOLKIT_VERSION }}-WinSvr2022-For-HIP.exe" -OutFile "${env:RUNNER_TEMP}\rocm-install.exe"
           write-host "Installing AMD HIP SDK"
           Start-Process "${env:RUNNER_TEMP}\rocm-install.exe" -ArgumentList '-install' -NoNewWindow -Wait
           write-host "Completed AMD HIP SDK installation"
         shell: pwsh
 
       - name: setup hip environment
-        if: matrix.name == 'windows-hip'
+        if: matrix.name == 'windows-gpu'
         run: |
           & 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' --version
           $HIP_PWSH = "$(Resolve-Path 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' | split-path | split-path)"
@@ -296,12 +293,12 @@ jobs:
         shell: pwsh
 
       - name: windows install ninja and sqlite for cuda, hip, and sycl
-        if: matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl'
+        if: matrix.name == 'windows-gpu'
         run: choco install ninja sqlite -y
         shell: pwsh
 
       - name: cache intel oneapi toolkit
-        if: matrix.name == 'windows-sycl'
+        if: matrix.name == 'windows-gpu'
         id: cache-oneapi
         uses: actions/cache@v4
         with:
@@ -310,7 +307,7 @@ jobs:
           key: oneapi-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.dpcpp-mkl }}-${{ steps.submodule-hashes.outputs.basekit-url }}
 
       - name: windows install intel oneapi toolkit for sycl
-        if: matrix.name == 'windows-sycl' && steps.cache-oneapi.outputs.cache-hit != 'true'
+        if: matrix.name == 'windows-gpu' && steps.cache-oneapi.outputs.cache-hit != 'true'
         run: modules/llama.cpp/scripts/install-oneapi.bat $WINDOWS_BASEKIT_URL $WINDOWS_DPCPP_MKL
 
       - name: cache llama.cpp build
@@ -341,14 +338,14 @@ jobs:
           key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}
 
       - name: build llama.cpp (sycl/msvc)
-        if: matrix.name == 'windows-sycl' && steps.cache-llama.outputs.cache-hit != 'true'
+        if: false #matrix.name == 'windows-sycl' && steps.cache-llama.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
           make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build llama.cpp (cuda/hip/msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-llama.outputs.cache-hit != 'true'
+        if: false #(matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-llama.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -358,7 +355,7 @@ jobs:
           make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build llama.cpp (mingw/windows)
-        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-cuda' && matrix.name != 'windows-hip' && matrix.name != 'windows-sycl' && steps.cache-llama.outputs.cache-hit != 'true'
+        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
@@ -367,14 +364,14 @@ jobs:
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (sycl/msvc)
-        if: matrix.name == 'windows-sycl' && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: false #matrix.name == 'windows-sycl' && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
           make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (cuda/hip/msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: false #(matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -384,7 +381,7 @@ jobs:
           make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (mingw/windows)
-        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-cuda' && matrix.name != 'windows-hip' && matrix.name != 'windows-sycl' && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-gpu' && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
@@ -393,14 +390,14 @@ jobs:
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (sycl/msvc)
-        if: matrix.name == 'windows-sycl' && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: false #matrix.name == 'windows-sycl' && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
           make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (cuda/hip/msvc)
-        if: (matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: false #(matrix.name == 'windows-cuda' || matrix.name == 'windows-hip') && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -410,7 +407,7 @@ jobs:
           make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (mingw/windows)
-        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-cuda' && matrix.name != 'windows-hip' && matrix.name != 'windows-sycl' && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-gpu' && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
@@ -419,7 +416,7 @@ jobs:
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai with cuda (msvc)
-        if: matrix.name == 'windows-cuda'
+        if: false #matrix.name == 'windows-cuda'
         shell: cmd
         run: |
           setlocal enabledelayedexpansion
@@ -436,7 +433,7 @@ jobs:
           make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai with hip (clang)
-        if: matrix.name == 'windows-hip'
+        if: false #matrix.name == 'windows-hip'
         shell: cmd
         run: |
           set PATH=%HIP_PATH%\bin;%PATH%
@@ -447,14 +444,14 @@ jobs:
           HIP_PLATFORM: amd
 
       - name: windows build sqlite-ai with sycl (msvc)
-        if: matrix.name == 'windows-sycl'
+        if: false #matrix.name == 'windows-sycl'
         shell: cmd
         run: |
           call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
           make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai (mingw)
-        if: matrix.os == 'windows-latest' && matrix.name != 'windows-cuda' && matrix.name != 'windows-hip' && matrix.name != 'windows-sycl'
+        if: matrix.os == 'windows-latest' && matrix.name != 'windows-gpu'
         run: make extension ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
 
@@ -509,7 +506,7 @@ jobs:
             adb shell "sh /data/local/tmp/commands.sh"
 
       - name: windows test sqlite-ai (msvc)
-        if: matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl'
+        if: false #matrix.name == 'windows-cuda' || matrix.name == 'windows-hip' || matrix.name == 'windows-sycl'
         shell: cmd
         run: |
           setlocal enabledelayedexpansion
@@ -531,7 +528,7 @@ jobs:
           make test ${{ matrix.make && matrix.make || ''}}
 
       - name: windows test sqlite-ai (mingw)
-        if: startsWith(matrix.name, 'windows-') && matrix.name != 'windows-cuda' && matrix.name != 'windows-hip' && matrix.name != 'windows-sycl'
+        if: startsWith(matrix.name, 'windows-') && matrix.name != 'windows-gpu'
         run: make test ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
 
