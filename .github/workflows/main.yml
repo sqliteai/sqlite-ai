@@ -104,7 +104,7 @@ jobs:
           - os: windows-latest
             arch: x86_64
             name: windows-gpu
-            make: LLAMA="-G \"Ninja Multi-Config\" -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON -DGGML_HIP=ON -DGGML_SYCL=ON"
+            make: LLAMA="-DGGML_BACKEND_DL=ON -G \"Ninja Multi-Config\" -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON -DGGML_HIP=ON -DGGML_SYCL=ON"
             make-cuda: LLAMA_ARGS="--target ggml-cuda" LLAMA="-G \"Ninja Multi-Config\" -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_CUDA=ON"
             make-hip: LLAMA_ARGS="--target ggml-hip" LLAMA="-G \"Ninja\" -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=ON -DAMDGPU_TARGETS=\"gfx1100;gfx1101;gfx1102;gfx1030;gfx1031;gfx1032\" -DCMAKE_C_COMPILER=\"%HIP_PATH%/bin/clang.exe\" -DCMAKE_CXX_COMPILER=\"%HIP_PATH%/bin/clang++.exe\" -DCMAKE_CXX_FLAGS=\"-I../../rocwmma/library/include/ -Wno-ignored-attributes -Wno-nested-anon-types\""
             make-sycl: LLAMA_ARGS="--target ggml-sycl" LLAMA="-G \"Ninja\" -DGGML_BACKEND_DL=ON -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=icx -DGGML_NATIVE=OFF -DGGML_CPU=OFF -DGGML_SYCL=ON"
@@ -337,42 +337,63 @@ jobs:
             build/miniaudio.stamp
           key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}
 
-      - name: build ggml-sycl
-        if: false #matrix.name == 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
-        shell: cmd
+      - name: download backend modules from llama.cpp releases
+        if: matrix.name == 'windows-gpu'
+        shell: bash
         run: |
-          call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
-          make build/llama.cpp.stamp ${{ matrix.make-sycl }}
+          # Get the latest llama.cpp release tag
+          LLAMA_VERSION=$(git -C modules/llama.cpp describe --tags --abbrev=0)
+          echo "Downloading backend modules for llama.cpp version: $LLAMA_VERSION"
+          
+          # Create directories
+          mkdir -p build/llama.cpp/bin
+          
+          # llama.cpp releases use this naming pattern for Windows builds
+          RELEASE_URL="https://github.com/ggerganov/llama.cpp/releases/download/${LLAMA_VERSION}"
+          
+          # Download the main Windows release which contains backend DLLs
+          echo "Attempting to download llama.cpp Windows release..."
+          if curl -fsSL "${RELEASE_URL}/llama-${LLAMA_VERSION}-bin-win-x64.zip" -o llama-win.zip 2>/dev/null; then
+            echo "Downloaded llama.cpp Windows release"
+            # Extract only DLL files to the bin directory
+            unzip -j llama-win.zip "*.dll" -d build/llama.cpp/bin/ 2>/dev/null || echo "No DLLs found in main archive"
+            rm llama-win.zip
+          else
+            echo "Main Windows release not found, trying alternative download methods..."
+          fi
+          
+          # Try alternative naming patterns for GPU-specific builds
+          for gpu_variant in "cuda-cu12.2.0-x64" "hip-rocm-win-x64" "sycl-x64"; do
+            filename="llama-${LLAMA_VERSION}-bin-win-${gpu_variant}.zip"
+            echo "Trying to download ${filename}..."
+            if curl -fsSL "${RELEASE_URL}/${filename}" -o "${gpu_variant}.zip" 2>/dev/null; then
+              echo "Downloaded ${filename}"
+              unzip -j "${gpu_variant}.zip" "*.dll" -d build/llama.cpp/bin/ 2>/dev/null || echo "No DLLs in ${filename}"
+              rm "${gpu_variant}.zip"
+            fi
+          done
+          
+          # If no DLLs found, create dummy files to indicate we should build locally
+          if [ ! -d "build/llama.cpp/bin" ] || [ -z "$(ls -A build/llama.cpp/bin/ 2>/dev/null)" ]; then
+            echo "No backend modules downloaded, will build locally if needed"
+            mkdir -p build/llama.cpp/bin
+            touch build/llama.cpp/bin/.empty
+          else
+            echo "Downloaded backend modules:"
+            ls -la build/llama.cpp/bin/
+          fi
 
-      - name: build ggml-hip (msvc)
-        if: false #matrix.name == 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
-          set "PATH=%PATH:C:\msys64\usr\bin;=%"
-          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
-          make build/llama.cpp.stamp ${{ matrix.make-hip }}
-
-      - name: build ggml-cuda (msvc)
-        if: false #matrix.name == 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
-          set "PATH=%PATH:C:\msys64\usr\bin;=%"
-          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
-          make build/llama.cpp.stamp ${{ matrix.make-cuda }}
-
-      - name: build llama.cpp (msvc)
+      - name: build llama.cpp main library (mingw)
         if: matrix.name == 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
-        shell: cmd
+        shell: msys2 {0}
+        run: make build/llama.cpp.stamp ${{ matrix.make }}
+
+      - name: copy backend modules to dist
+        if: matrix.name == 'windows-gpu'
+        shell: msys2 {0}
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
-          set "PATH=%PATH:C:\msys64\usr\bin;=%"
-          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
-          make build/llama.cpp.stamp ${{ matrix.make }}
+          mkdir -p dist
+          cp build/llama.cpp/bin/*.dll dist/ 2>/dev/null || echo "No backend DLLs found, continuing..."
 
       - name: build llama.cpp (mingw/windows)
         if: contains(matrix.os, 'windows-') && matrix.name != 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
@@ -469,6 +490,11 @@ jobs:
         run: |
           call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
           make extension ${{ matrix.make && matrix.make || ''}}
+
+      - name: windows build sqlite-ai (gpu/mingw)
+        if: matrix.name == 'windows-gpu'
+        shell: msys2 {0}
+        run: make extension ${{ matrix.make }}
 
       - name: windows build sqlite-ai (mingw)
         if: matrix.os == 'windows-latest' && matrix.name != 'windows-gpu'
