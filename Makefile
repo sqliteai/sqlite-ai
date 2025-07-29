@@ -126,6 +126,10 @@ ifeq ($(PLATFORM),windows)
 		MSVC_LIBS += bcrypt.lib ucrt.lib msvcrt.lib legacy_stdio_definitions.lib
 		DEF_FILE := $(BUILD_DIR)/ai.def
 		STRIP = echo "No stripping needed for MSVC"
+	else ifeq ($(USE_HIP_CLANG),1)
+		LDFLAGS += -shared -lbcrypt
+		DEF_FILE := $(BUILD_DIR)/ai.def
+		STRIP = strip --strip-unneeded $@
 	else
 		LDFLAGS += -shared -lbcrypt -lgomp -lstdc++
 		DEF_FILE := $(BUILD_DIR)/ai.def
