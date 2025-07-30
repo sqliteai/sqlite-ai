@@ -309,10 +309,11 @@ jobs:
         run: |
           call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target common"
-          make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target llama"
+          set CUDAHOSTCXX=cl.exe
           make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target ggml"
-          make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target ggml-base"
+          #make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target common"
+          #make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target llama"
+          #make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target ggml-base"
 
       - name: copy backend modules to dist
         if: false #matrix.name == 'windows-gpu'
