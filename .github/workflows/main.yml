@@ -431,6 +431,8 @@ jobs:
         if: matrix.name == 'windows'
         run: make extension ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
+        env:
+          VULKAN_SDK: "C:/msys64/mingw64"
 
       - name: build sqlite-ai
         if: matrix.os != 'windows-latest'
