@@ -18,48 +18,20 @@ jobs:
           - os: ubuntu-latest
             arch: x86_64
             name: linux
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
           - os: LinuxARM64
             arch: arm64
             name: linux
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
           - os: macos-latest
             name: macos
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+            make: LLAMA="-DGGML_NATIVE=ON -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DGGML_LLAMAFILE=ON" WHISPER="-DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           
           # Windows builds
           - os: windows-latest
             arch: x86_64
-            name: windows-cpu
-            make: LLAMA="-DGGML_NATIVE=ON"
-          - os: windows-latest
-            arch: x86_64
-            name: windows-cpu-avx2
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DGGML_SSE42=ON"
-          - os: windows-latest
-            arch: x86_64
-            name: windows-cpu-avx512
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX512=ON -DGGML_AVX512_VNNI=ON -DGGML_AVX512_VBMI=ON -DGGML_AVX512_BF16=ON"
-          - os: windows-latest
-            arch: x86_64
-            name: windows-cpu-avx-vnni
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX_VNNI=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
-          - os: windows-latest
-            arch: x86_64
-            name: windows-openblas
-            make: LLAMA="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
-          - os: windows-latest
-            arch: x86_64
-            name: windows-llamafile
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_LLAMAFILE=ON"
-          - os: windows-latest
-            arch: x86_64
-            name: windows-vulkan
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
-          - os: windows-latest
-            arch: x86_64
-            name: windows-opencl
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
+            name: windows
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
           - os: windows-latest
             arch: x86_64
             name: windows-gpu
@@ -143,12 +115,12 @@ jobs:
             sqlite
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
-            ${{ matrix.name == 'windows-vulkan' && 'mingw-w64-x86_64-vulkan-headers' || '' }}
-            ${{ matrix.name == 'windows-vulkan' && 'mingw-w64-x86_64-vulkan-loader' || '' }}
-            ${{ matrix.name == 'windows-vulkan' && 'mingw-w64-x86_64-shaderc' || '' }}
-            ${{ matrix.name == 'windows-openblas' && 'mingw-w64-x86_64-openblas' || '' }}
-            ${{ matrix.name == 'windows-opencl' && 'mingw-w64-x86_64-opencl-headers' || '' }}
-            ${{ matrix.name == 'windows-opencl' && 'mingw-w64-x86_64-opencl-icd' || '' }}
+            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-vulkan-headers' || '' }}
+            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-vulkan-loader' || '' }}
+            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-shaderc' || '' }}
+            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-openblas' || '' }}
+            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-opencl-headers' || '' }}
+            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-opencl-icd' || '' }}
           
       - name: linux install openblas and opencl
         if: matrix.name == 'linux'
@@ -193,7 +165,7 @@ jobs:
                   libvulkan-dev:arm64
 
       - name: windows setup vulkan environment
-        if: matrix.name == 'windows-vulkan'
+        if: matrix.name == 'windows'
         run: |
           # MSYS2 Vulkan packages are already installed, just set up environment
           echo "VULKAN_SDK=C:/msys64/mingw64" >> $GITHUB_ENV
@@ -366,12 +338,12 @@ jobs:
           cp build/llama.cpp/bin/*.dll dist/ 2>/dev/null || echo "No backend DLLs found, continuing..."
 
       - name: build llama.cpp (mingw/windows)
-        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
+        if: matrix.name == 'windows' && steps.cache-llama.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build llama.cpp (mingw/unix)
-        if: contains(matrix.os, 'windows-') == false && steps.cache-llama.outputs.cache-hit != 'true'
+        if: contains(matrix.os, 'windows') == false && steps.cache-llama.outputs.cache-hit != 'true'
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (sycl/msvc)
@@ -392,12 +364,12 @@ jobs:
           make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (mingw/windows)
-        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-gpu' && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: matrix.name == 'windows' && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build whisper.cpp (mingw/unix)
-        if: contains(matrix.os, 'windows-') == false && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: contains(matrix.os, 'windows') == false && steps.cache-whisper.outputs.cache-hit != 'true'
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (sycl/msvc)
@@ -418,12 +390,12 @@ jobs:
           make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (mingw/windows)
-        if: contains(matrix.os, 'windows-') && matrix.name != 'windows-gpu' && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: matrix.name == 'windows' && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: build miniaudio (mingw/unix)
-        if: contains(matrix.os, 'windows-') == false && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: contains(matrix.os, 'windows') == false && steps.cache-miniaudio.outputs.cache-hit != 'true'
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai with cuda (msvc)
@@ -467,7 +439,7 @@ jobs:
         run: make extension ${{ matrix.make }}
 
       - name: windows build sqlite-ai (mingw)
-        if: matrix.os == 'windows-latest' && matrix.name != 'windows-gpu'
+        if: matrix.name == 'windows'
         run: make extension ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
 
@@ -546,7 +518,7 @@ jobs:
           make test ${{ matrix.make && matrix.make || ''}}
 
       - name: windows test sqlite-ai (mingw)
-        if: startsWith(matrix.name, 'windows-') && matrix.name != 'windows-gpu'
+        if: matrix.name == 'windows'
         run: make test ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
 
