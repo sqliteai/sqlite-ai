@@ -386,10 +386,14 @@ jobs:
       - name: build llama.cpp main library (mingw)
         if: matrix.name == 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
         shell: msys2 {0}
-        run: make build/llama.cpp.stamp ${{ matrix.make }}
+        run: |
+          make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target common"
+          make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target llama"
+          make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target ggml"
+          make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target ggml-base"
 
       - name: copy backend modules to dist
-        if: matrix.name == 'windows-gpu'
+        if: false #matrix.name == 'windows-gpu'
         shell: msys2 {0}
         run: |
           mkdir -p dist
