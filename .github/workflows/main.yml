@@ -101,7 +101,7 @@ jobs:
           echo "basekit-url=$BASEKIT_URL_HASH" >> $GITHUB_OUTPUT
 
       - uses: msys2/setup-msys2@v2.27.0
-        if: matrix.os == 'windows-latest'
+        if: matrix.name == 'windows'
         with:
           msystem: mingw64
           install: >-
@@ -110,12 +110,12 @@ jobs:
             sqlite
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
-            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-vulkan-headers' || '' }}
-            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-vulkan-loader' || '' }}
-            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-shaderc' || '' }}
-            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-openblas' || '' }}
-            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-opencl-headers' || '' }}
-            ${{ matrix.name != 'windows-gpu' && 'mingw-w64-x86_64-opencl-icd' || '' }}
+            mingw-w64-x86_64-vulkan-headers
+            mingw-w64-x86_64-vulkan-loader
+            mingw-w64-x86_64-shaderc
+            mingw-w64-x86_64-openblas
+            mingw-w64-x86_64-opencl-headers
+            mingw-w64-x86_64-opencl-icd
           
       - name: linux install openblas and opencl
         if: matrix.name == 'linux'
@@ -152,18 +152,7 @@ jobs:
           EOF
 
           sudo apt-get update || true    ;# Prevent failure due to missing URLs.
-
-          sudo apt-get install -y --no-install-recommends \
-                  build-essential \
-                  glslc \
-                  crossbuild-essential-arm64 \
-                  libvulkan-dev:arm64
-
-      - name: windows setup vulkan environment
-        if: matrix.name == 'windows'
-        run: |
-          # MSYS2 Vulkan packages are already installed, just set up environment
-          echo "VULKAN_SDK=C:/msys64/mingw64" >> $GITHUB_ENV
+          sudo apt-get install -y --no-install-recommends build-essential glslc crossbuild-essential-arm64 libvulkan-dev:arm64
 
       - name: cache cuda toolkit
         if: matrix.name == 'windows-gpu'
@@ -336,6 +325,8 @@ jobs:
         if: matrix.name == 'windows' && steps.cache-llama.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+        env:
+          VULKAN_SDK: "C:/msys64/mingw64"
 
       - name: build llama.cpp (mingw/unix)
         if: contains(matrix.os, 'windows') == false && steps.cache-llama.outputs.cache-hit != 'true'
@@ -362,6 +353,8 @@ jobs:
         if: matrix.name == 'windows' && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+        env:
+          VULKAN_SDK: "C:/msys64/mingw64"
 
       - name: build whisper.cpp (mingw/unix)
         if: contains(matrix.os, 'windows') == false && steps.cache-whisper.outputs.cache-hit != 'true'
