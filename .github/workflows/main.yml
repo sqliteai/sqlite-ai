@@ -101,7 +101,7 @@ jobs:
           echo "basekit-url=$BASEKIT_URL_HASH" >> $GITHUB_OUTPUT
 
       - uses: msys2/setup-msys2@v2.27.0
-        if: matrix.name == 'windows'
+        if: matrix.os == 'windows-latest'
         with:
           msystem: mingw64
           install: >-
@@ -155,7 +155,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends build-essential glslc crossbuild-essential-arm64 libvulkan-dev:arm64
 
       - name: cache cuda toolkit
-        if: matrix.name == 'windows-gpu'
+        if: false #matrix.name == 'windows-gpu'
         id: cache-cuda
         uses: actions/cache@v4
         with:
@@ -164,13 +164,13 @@ jobs:
           key: cuda-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ env.CUDA_VERSION }}
 
       - name: windows install cuda
-        if: matrix.name == 'windows-gpu' && steps.cache-cuda.outputs.cache-hit != 'true'
+        if: false #matrix.name == 'windows-gpu' && steps.cache-cuda.outputs.cache-hit != 'true'
         uses: ./modules/llama.cpp/.github/actions/windows-setup-cuda
         with:
           cuda_version: ${{ env.CUDA_VERSION }}
 
       - name: windows setup cuda toolkit
-        if: matrix.name == 'windows-gpu'
+        if: false #matrix.name == 'windows-gpu'
         run: |
           echo "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           echo "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}\libnvvp" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -179,7 +179,7 @@ jobs:
         shell: pwsh
 
       - name: cache hip toolkit
-        if: matrix.name == 'windows-gpu'
+        if: false #matrix.name == 'windows-gpu'
         id: cache-hip
         uses: actions/cache@v4
         with:
@@ -189,7 +189,7 @@ jobs:
           key: hip-toolkit-${{ env.HIP_TOOLKIT_VERSION }}-rocwmma-${{ env.ROCWMMA_VERSION }}
 
       - name: windows install hip toolkit
-        if: matrix.name == 'windows-gpu' && steps.cache-hip.outputs.cache-hit != 'true'
+        if: false #matrix.name == 'windows-gpu' && steps.cache-hip.outputs.cache-hit != 'true'
         run: |
           git clone https://github.com/rocm/rocwmma --branch rocm-${{ env.ROCWMMA_VERSION }} --depth 1
           $ErrorActionPreference = "Stop"
@@ -201,7 +201,7 @@ jobs:
         shell: pwsh
 
       - name: setup hip environment
-        if: matrix.name == 'windows-gpu'
+        if: false #matrix.name == 'windows-gpu'
         run: |
           & 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' --version
           $HIP_PWSH = "$(Resolve-Path 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' | split-path | split-path)"
@@ -213,7 +213,7 @@ jobs:
         shell: pwsh
 
       - name: cache intel oneapi toolkit
-        if: matrix.name == 'windows-gpu'
+        if: false #matrix.name == 'windows-gpu'
         id: cache-oneapi
         uses: actions/cache@v4
         with:
@@ -222,7 +222,7 @@ jobs:
           key: oneapi-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.dpcpp-mkl }}-${{ steps.submodule-hashes.outputs.basekit-url }}
 
       - name: windows install intel oneapi toolkit for sycl
-        if: matrix.name == 'windows-gpu' && steps.cache-oneapi.outputs.cache-hit != 'true'
+        if: false #matrix.name == 'windows-gpu' && steps.cache-oneapi.outputs.cache-hit != 'true'
         run: modules/llama.cpp/scripts/install-oneapi.bat $WINDOWS_BASEKIT_URL $WINDOWS_DPCPP_MKL
 
       - name: windows-gpu install ninja and sqlite
@@ -303,16 +303,6 @@ jobs:
             ls -la build/llama.cpp/bin/
           fi
 
-      - name: windows build llama.cpp
-        if: matrix.name == 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
-          set "PATH=%PATH:C:\msys64\usr\bin;=%"
-          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
-          make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
-
       - name: copy backend modules to dist
         if: false #matrix.name == 'windows-gpu'
         shell: msys2 {0}
@@ -320,119 +310,45 @@ jobs:
           mkdir -p dist
           cp build/llama.cpp/bin/*.dll dist/ 2>/dev/null || echo "No backend DLLs found, continuing..."
 
-      - name: build llama.cpp (mingw/windows)
-        if: matrix.name == 'windows' && steps.cache-llama.outputs.cache-hit != 'true'
+      - name: windows build llama.cpp
+        if: matrix.os == 'windows-latest' && steps.cache-llama.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
         env:
           VULKAN_SDK: "C:/msys64/mingw64"
 
-      - name: build llama.cpp (mingw/unix)
-        if: contains(matrix.os, 'windows') == false && steps.cache-llama.outputs.cache-hit != 'true'
+      - name: unix build llama.cpp
+        if: matrix.os != 'windows-latest' && steps.cache-llama.outputs.cache-hit != 'true'
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
-      - name: build whisper.cpp (sycl/msvc)
-        if: false #matrix.name == 'windows-gpu' && steps.cache-whisper.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
-          make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
-
-      - name: build whisper.cpp (cuda/hip/msvc)
-        if: false #matrix.name == 'windows-gpu' && steps.cache-whisper.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
-          set "PATH=%PATH:C:\msys64\usr\bin;=%"
-          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
-          make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
-
-      - name: build whisper.cpp (mingw/windows)
-        if: matrix.name == 'windows' && steps.cache-whisper.outputs.cache-hit != 'true'
+      - name: windows build whisper.cpp 
+        if: matrix.os == 'windows-latest' && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
         env:
           VULKAN_SDK: "C:/msys64/mingw64"
 
-      - name: build whisper.cpp (mingw/unix)
-        if: contains(matrix.os, 'windows') == false && steps.cache-whisper.outputs.cache-hit != 'true'
+      - name: unix build whisper.cpp
+        if: matrix.os != 'windows-latest' && steps.cache-whisper.outputs.cache-hit != 'true'
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
-      - name: build miniaudio (sycl/msvc)
-        if: false #matrix.name == 'windows-gpu' && steps.cache-miniaudio.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
-          make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
-
-      - name: build miniaudio (cuda/hip/msvc)
-        if: false #matrix.name == 'windows-gpu' && steps.cache-miniaudio.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
-          set "PATH=%PATH:C:\msys64\usr\bin;=%"
-          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
-          make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
-
-      - name: build miniaudio (mingw/windows)
-        if: matrix.name == 'windows' && steps.cache-miniaudio.outputs.cache-hit != 'true'
+      - name: windows build miniaudio 
+        if: matrix.os == 'windows-latest' && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
-      - name: build miniaudio (mingw/unix)
-        if: contains(matrix.os, 'windows') == false && steps.cache-miniaudio.outputs.cache-hit != 'true'
+      - name: unix build miniaudio
+        if: matrix.os != 'windows-latest' && steps.cache-miniaudio.outputs.cache-hit != 'true'
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
-      - name: windows build sqlite-ai with cuda (msvc)
-        if: false #matrix.name == 'windows-gpu'
-        shell: cmd
-        run: |
-          setlocal enabledelayedexpansion
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
-          set "PATH=%PATH:C:\msys64\usr\bin;=%"
-          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
-          echo CUDA_PATH=%CUDA_PATH%
-          if not defined CUDA_PATH (
-            set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}"
-            echo Set CUDA_PATH=!CUDA_PATH!
-          )
-          where link
-          make extension ${{ matrix.make && matrix.make || ''}}
-
-      - name: windows build sqlite-ai with hip (clang)
-        if: false #matrix.name == 'windows-gpu'
-        shell: cmd
-        run: |
-          set PATH=%HIP_PATH%\bin;%PATH%
-          set CC=%HIP_PATH%\bin\clang.exe
-          set CXX=%HIP_PATH%\bin\clang++.exe
-          make extension ${{ matrix.make && matrix.make || ''}}
-        env:
-          HIP_PLATFORM: amd
-
-      - name: windows build sqlite-ai with sycl (msvc)
-        if: false #matrix.name == 'windows-gpu'
-        shell: cmd
-        run: |
-          call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
-          make extension ${{ matrix.make && matrix.make || ''}}
-
-      - name: windows build sqlite-ai (gpu/mingw)
-        if: matrix.name == 'windows-gpu'
-        shell: msys2 {0}
-        run: make extension ${{ matrix.make }}
-
-      - name: windows build sqlite-ai (mingw)
-        if: matrix.name == 'windows'
+      - name: windows build sqlite-ai
+        if: matrix.os == 'windows-latest'
         run: make extension ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
         env:
           VULKAN_SDK: "C:/msys64/mingw64"
 
-      - name: build sqlite-ai
+      - name: unix build sqlite-ai
         if: matrix.os != 'windows-latest'
         run: make extension ${{ matrix.make && matrix.make || ''}}
 
@@ -484,36 +400,14 @@ jobs:
             adb push ${{ github.workspace }}/Makefile /data/local/tmp/
             adb shell "sh /data/local/tmp/commands.sh"
 
-      - name: windows test sqlite-ai (msvc)
-        if: false #matrix.name == 'windows-gpu'
-        shell: cmd
-        run: |
-          setlocal enabledelayedexpansion
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          if "${{ matrix.name }}" == "windows-cuda" (
-            if not defined CUDA_PATH (
-              set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}"
-            )
-            set "PATH=!CUDA_PATH!\bin;%PATH%"
-          )
-          if "${{ matrix.name }}" == "windows-sycl" (
-            if exist "%ONEAPI_ROOT%\setvars.bat" (
-              call "%ONEAPI_ROOT%\setvars.bat"
-            )
-          )
-          set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
-          set "PATH=%PATH:C:\msys64\usr\bin;=%"
-          set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
-          make test ${{ matrix.make && matrix.make || ''}}
-
-      - name: windows test sqlite-ai (mingw)
-        if: matrix.name == 'windows'
+      - name: windows test sqlite-ai
+        if: matrix.os == 'windows-latest'
         run: make test ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
         env:
           VULKAN_SDK: "C:/msys64/mingw64"
 
-      - name: test sqlite-ai
+      - name: unix test sqlite-ai
         if: matrix.name == 'linux' || matrix.name == 'macos'
         run: make test
 
@@ -522,7 +416,7 @@ jobs:
         with:
           name: ai-${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }}
           path: dist/ai.*
-          #if-no-files-found: error
+          if-no-files-found: error
 
   release:
     runs-on: ubuntu-latest
