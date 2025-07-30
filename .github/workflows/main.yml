@@ -338,7 +338,7 @@ jobs:
           key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}
 
       - name: download backend modules from llama.cpp releases
-        if: matrix.name == 'windows-gpu'
+        if: false #matrix.name == 'windows-gpu'
         shell: bash
         run: |
           # Get the latest llama.cpp release tag
