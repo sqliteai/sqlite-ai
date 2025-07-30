@@ -9,7 +9,7 @@ permissions:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
-    name: ${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }} build${{ matrix.arch != 'arm64-v8a' && matrix.name != 'ios' && ' + test' || ''}}
+    name: ${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }} build${{ matrix.arch != 'arm64-v8a' && matrix.name != 'isim' && matrix.name != 'ios' && ' + test' || ''}}
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -52,6 +52,9 @@ jobs:
 
           - os: macos-latest
             name: ios
+            make: PLATFORM=ios LLAMA="-DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+          - os: macos-latest
+            name: isim
             make: PLATFORM=isim LLAMA="-DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
 
     defaults:

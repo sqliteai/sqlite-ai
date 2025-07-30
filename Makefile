@@ -240,11 +240,11 @@ else ifeq ($(PLATFORM),isim)
 	SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=14.0
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
 	WHISPER_LDFLAGS += -lwhisper.coreml
-	LDFLAGS += -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
-	CFLAGS += -arch arm64 -x objective-c $(SDK)
-	LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="arm64"
-	WHISPER_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="arm64" -DWHISPER_COREML=ON
-	MINIAUDIO_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="arm64" -DCMAKE_C_FLAGS="-x objective-c"
+	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
+	CFLAGS += -arch x86_64 -arch arm64 -x objective-c $(SDK)
+	LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+	WHISPER_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
+	MINIAUDIO_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_C_FLAGS="-x objective-c"
 	STRIP = strip -x -S $@
 else # linux
 	TARGET := $(DIST_DIR)/ai.so
@@ -451,7 +451,8 @@ help:
 	@echo "  macos (default on macOS)"
 	@echo "  windows (default on Windows)"
 	@echo "  android (needs ARCH to be set to x86_64 or arm64-v8a and ANDROID_NDK to be set)"
-	@echo "  ios (universal binary for device and simulator, only on macOS)"
+	@echo "  ios (only on macOS)"
+	@echo "  isim (only on macOS)"
 	@echo ""
 	@echo "Targets:"
 	@echo "  all					- Build the extension (default)"
