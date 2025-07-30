@@ -307,12 +307,11 @@ jobs:
         if: matrix.name == 'windows-gpu' && steps.cache-llama.outputs.cache-hit != 'true'
         shell: cmd
         run: |
-          call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 --force
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
           set "PATH=%VCToolsInstallDir%bin\Hostx64\x64;%WindowsSdkBinPath%x64;%PATH%"
           set "PATH=%PATH:C:\msys64\usr\bin;=%"
           set "PATH=%PATH:C:\msys64\mingw64\bin;=%"
-          make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target ggml"
+          make build/llama.cpp.stamp ${{ matrix.make }}
 
       - name: copy backend modules to dist
         if: false #matrix.name == 'windows-gpu'
