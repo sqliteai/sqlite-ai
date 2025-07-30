@@ -392,7 +392,7 @@ jobs:
           make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target ggml"
           make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target ggml-base"
         env:
-          CUDAToolkit_ROOT: "C:\Program Files\NVIDIA GPU Computing Toolkit"
+          CUDAToolkit_ROOT: "C:/Program Files/NVIDIA GPU Computing Toolkit"
 
       - name: copy backend modules to dist
         if: false #matrix.name == 'windows-gpu'
