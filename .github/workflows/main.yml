@@ -258,6 +258,15 @@ jobs:
         with:
           cuda_version: ${{ env.CUDA_VERSION }}
 
+      - name: windows setup cuda toolkit
+        if: matrix.name == 'windows-gpu'
+        run: |
+          echo "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}\libnvvp" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          echo "CUDA_PATH_V12_4=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        shell: pwsh
+
       - name: cache hip toolkit
         if: matrix.name == 'windows-gpu'
         id: cache-hip
@@ -391,8 +400,6 @@ jobs:
           make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target llama"
           make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target ggml"
           make build/llama.cpp.stamp ${{ matrix.make }} LLAMA_ARGS="--target ggml-base"
-        env:
-          CUDAToolkit_ROOT: "C:/Program Files/NVIDIA GPU Computing Toolkit"
 
       - name: copy backend modules to dist
         if: false #matrix.name == 'windows-gpu'
