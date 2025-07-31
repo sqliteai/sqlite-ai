@@ -32,6 +32,7 @@ BUILD_DIR = build
 LLAMA_DIR = modules/llama.cpp
 WHISPER_DIR = modules/whisper.cpp
 MINIAUDIO_DIR = modules/miniaudio
+BUILD_GGML = $(BUILD_DIR)/ggml
 BUILD_LLAMA = $(BUILD_DIR)/llama.cpp
 BUILD_WHISPER = $(BUILD_DIR)/whisper.cpp
 BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
@@ -39,9 +40,9 @@ BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 # Compiler and flags
 CC = gcc
 CXX = g++
-CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
+CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(GGML_DIR)/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
 LLAMA_OPTIONS = $(LLAMA) -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
-WHISPER_OPTIONS = $(WHISPER) -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF
+WHISPER_OPTIONS = $(WHISPER) -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF -DWHISPER_USE_SYSTEM_GGML=ON
 MINIAUDIO_OPTIONS = $(MINIAUDIO) -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
 # MinGW produces .a files without lib prefix, use -l:filename.a syntax
 ifeq ($(PLATFORM),windows)
@@ -59,7 +60,7 @@ else
 	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF
 	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF
 	MINIAUDIO_OPTIONS += -DBUILD_SHARED_LIBS=OFF
-	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
+	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(GGML_DIR)/lib -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
 endif
 WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
 MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
@@ -72,7 +73,7 @@ OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC_FILES)))
 ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
 	LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/bin/ggml.dll $(BUILD_LLAMA)/bin/ggml-base.dll $(BUILD_LLAMA)/bin/libllama.dll $(BUILD_LLAMA)/bin/ggml-cpu.dll
 else
-	LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/ggml/src/libggml.a $(BUILD_LLAMA)/ggml/src/libggml-base.a $(BUILD_LLAMA)/ggml/src/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
+	LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_GGML)/libggml.a $(BUILD_GGML)/libggml-base.a $(BUILD_GGML)/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
 endif
 WHISPER_LIBS = $(BUILD_WHISPER)/src/libwhisper.a
 MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
@@ -85,8 +86,8 @@ ifeq ($(PLATFORM),windows)
 	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
-	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
-	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup
+	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a $(BUILD_GGML)/lib/libggml-blas.a
+	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup
 	CFLAGS += -arch x86_64 -arch arm64
 	LLAMA_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	WHISPER_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
@@ -122,9 +123,9 @@ else ifeq ($(PLATFORM),android)
 else ifeq ($(PLATFORM),ios)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
-	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
+	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a $(BUILD_GGML)/lib/libggml-blas.a
 	WHISPER_LDFLAGS += -lwhisper.coreml
-	LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
+	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
 	CFLAGS += -arch arm64 -x objective-c $(SDK)
 	LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
 	WHISPER_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DWHISPER_COREML=ON
@@ -133,9 +134,9 @@ else ifeq ($(PLATFORM),ios)
 else ifeq ($(PLATFORM),isim)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=14.0
-	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
+	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a $(BUILD_GGML)/lib/libggml-blas.a
 	WHISPER_LDFLAGS += -lwhisper.coreml
-	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_LLAMA)/ggml/src/ggml-metal -lggml-metal -L./$(BUILD_LLAMA)/ggml/src/ggml-blas -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
+	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
 	CFLAGS += -arch x86_64 -arch arm64 -x objective-c $(SDK)
 	LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	WHISPER_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
@@ -152,8 +153,8 @@ endif
 
 # Backend specific settings
 ifneq (,$(findstring VULKAN,$(LLAMA)))
-	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-vulkan/libggml-vulkan.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-vulkan $(L)ggml-vulkan$(A)
+	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-vulkan.a
+	LLAMA_LDFLAGS += -L./$(BUILD_GGML)/lib $(L)ggml-vulkan$(A)
 	# Vulkan variations
 	ifeq ($(PLATFORM),windows)
 		VULKAN_VAR = -1
@@ -166,15 +167,15 @@ ifneq (,$(findstring VULKAN,$(LLAMA)))
 	endif
 endif
 ifneq (,$(findstring OPENCL,$(LLAMA)))
-	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-opencl/libggml-opencl.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-opencl $(L)ggml-opencl$(A) -lOpenCL
+	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-opencl.a
+	LLAMA_LDFLAGS += -L./$(BUILD_GGML)/lib $(L)ggml-opencl$(A) -lOpenCL
 	ifneq ($(PLATFORM),windows)
 		LLAMA_LDFLAGS += -ldl
 	endif
 endif
 ifneq (,$(findstring BLAS,$(LLAMA)))
-	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
-	LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-blas $(L)ggml-blas$(A)
+	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-blas.a
+	LLAMA_LDFLAGS += -L./$(BUILD_GGML)/lib $(L)ggml-blas$(A)
 	# Link against specific BLAS implementations
 	ifneq (,$(findstring OpenBLAS,$(LLAMA)))
 		LLAMA_LDFLAGS += -lopenblas
@@ -237,10 +238,11 @@ endif
 build/llama.cpp.stamp:
 	cmake -B $(BUILD_LLAMA) $(LLAMA_OPTIONS) $(LLAMA_DIR)
 	cmake --build $(BUILD_LLAMA) --config Release $(LLAMA_ARGS) $(ARGS)
+	cmake --install $(BUILD_LLAMA) --prefix $(BUILD_GGML)
 	touch $@
 
-build/whisper.cpp.stamp:
-	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
+build/whisper.cpp.stamp: build/llama.cpp.stamp
+	ggml_DIR=$(BUILD_GGML) cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
 	cmake --build $(BUILD_WHISPER) --config Release $(WHISPER_ARGS) $(ARGS)
 	touch $@
 
