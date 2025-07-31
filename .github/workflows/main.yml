@@ -17,7 +17,7 @@ jobs:
         include:
           - os: macos-latest
             name: macos
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DGGML_LLAMAFILE=ON" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           - os: ubuntu-22.04
             arch: x86_64
             name: linux-cpu
@@ -25,7 +25,7 @@ jobs:
           - os: ubuntu-22.04
             arch: x86_64
             name: linux-gpu
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
           - os: LinuxARM64
             arch: arm64
             name: linux-cpu
@@ -33,7 +33,7 @@ jobs:
           - os: LinuxARM64
             arch: arm64
             name: linux-gpu
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
           - os: windows-latest
             arch: x86_64
             name: windows-cpu
@@ -41,7 +41,7 @@ jobs:
           - os: windows-latest
             arch: x86_64
             name: windows-gpu
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
           - os: ubuntu-latest
             arch: x86_64
             name: android
