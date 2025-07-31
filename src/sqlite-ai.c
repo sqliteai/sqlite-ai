@@ -24,13 +24,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _MSC_VER
-// MSVC doesn't have strncasecmp, provide implementation
-int strncasecmp(const char *s1, const char *s2, size_t n) {
-    return _strnicmp(s1, s2, n);
-}
-#endif
-
 #ifndef SQLITE_CORE
 SQLITE_EXTENSION_INIT1
 #endif
