@@ -205,47 +205,6 @@ ifneq (,$(findstring COREML,$(WHISPER))) # CoreML - only macos
 	WHISPER_OPTIONS += -DWHISPER_COREML=ON
 	LDFLAGS += -framework CoreML
 endif
-ifneq (,$(findstring CUDA,$(LLAMA)))
-	ifeq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-		# Static CUDA linking (only when not using dynamic backend loading)
-		ifneq ($(PLATFORM),windows)
-			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda $(L)ggml-cuda$(A) -lcuda -lcublas -lcublasLt -lcudart -ldl
-			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/libggml-cuda.a
-		else
-			# MinGW CUDA build - use original approach
-			LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common/Release -L./$(BUILD_LLAMA)/ggml/src/Release -L./$(BUILD_LLAMA)/src/Release -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda/Release -L"$(CUDA_PATH)/lib/x64" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-cuda.lib -lcuda -lcudart
-			WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -L./$(BUILD_WHISPER)/src/Release -lwhisper
-			MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -L./$(BUILD_MINIAUDIO)/Release -lminiaudio
-			$(error Windows MinGW CUDA build is not supported yet)
-		endif
-	endif
-endif
-ifneq (,$(findstring HIP,$(LLAMA)))
-	ifeq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-		# Static HIP linking (only when not using dynamic backend loading)
-		ifneq ($(PLATFORM),windows)
-			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip $(L)ggml-hip$(A) -lhip -lrocblas -ldl
-			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/libggml-hip.a
-		else
-			# Windows HIP build - HIP libraries are built as .lib files in Release/ directories
-			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/ggml-hip.lib
-			# MinGW linker flags for HIP
-			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip -L"$(HIP_PATH)/lib" -lggml-hip -lamdhip64 -lrocblas
-		endif
-	endif
-endif
-ifneq (,$(findstring SYCL,$(LLAMA)))
-	ifeq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-		# Static SYCL linking (only when not using dynamic backend loading)
-		ifneq ($(PLATFORM),windows)
-			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-sycl $(L)ggml-sycl$(A) -lsycl -ldl
-			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-sycl/libggml-sycl.a
-		else
-			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-sycl/ggml-sycl.lib
-			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-sycl -lggml-sycl -lsycl
-		endif
-	endif
-endif
 
 # Windows .def file generation
 $(DEF_FILE):
