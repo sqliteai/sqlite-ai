@@ -86,8 +86,8 @@ ifeq ($(PLATFORM),windows)
 	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
-	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a $(BUILD_GGML)/lib/libggml-blas.a
-	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup
+	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
+	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup
 	CFLAGS += -arch x86_64 -arch arm64
 	LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
@@ -123,9 +123,9 @@ else ifeq ($(PLATFORM),android)
 else ifeq ($(PLATFORM),ios)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
-	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a $(BUILD_GGML)/lib/libggml-blas.a
+	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
 	WHISPER_LDFLAGS += -lwhisper.coreml
-	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
+	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
 	CFLAGS += -arch arm64 -x objective-c $(SDK)
 	LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
 	WHISPER_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DWHISPER_COREML=ON
@@ -134,9 +134,9 @@ else ifeq ($(PLATFORM),ios)
 else ifeq ($(PLATFORM),isim)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=14.0
-	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a $(BUILD_GGML)/lib/libggml-blas.a
+	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
 	WHISPER_LDFLAGS += -lwhisper.coreml
-	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -lggml-blas -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
+	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
 	CFLAGS += -arch x86_64 -arch arm64 -x objective-c $(SDK)
 	LLAMA_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	WHISPER_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
