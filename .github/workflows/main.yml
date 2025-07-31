@@ -45,7 +45,7 @@ jobs:
           - os: ubuntu-latest
             arch: x86_64
             name: android
-            make: PLATFORM=android ARCH=x86_64
+            make: PLATFORM=android ARCH=x86_64 LLAMA="-DGGML_AVX2=ON -DGGML_FMA=ON"
             sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
           - os: ubuntu-latest
             arch: arm64-v8a
