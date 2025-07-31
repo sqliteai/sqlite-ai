@@ -89,8 +89,8 @@ else ifeq ($(PLATFORM),macos)
 	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a $(BUILD_GGML)/lib/libggml-blas.a
 	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup
 	CFLAGS += -arch x86_64 -arch arm64
-	LLAMA_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
-	WHISPER_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+	LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	MINIAUDIO_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),android)
