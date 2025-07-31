@@ -110,11 +110,11 @@ jobs:
             sqlite
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
-            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-vulkan-headers' }} 
-            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-vulkan-loader' }} 
-            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-shaderc' }} 
-            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-opencl-headers' }} 
-            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-opencl-icd' }} 
+            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-vulkan-headers' || '' }} 
+            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-vulkan-loader' || '' }} 
+            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-shaderc' || '' }} 
+            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-opencl-headers' || '' }} 
+            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-opencl-icd' || '' }} 
           
       - name: linux install opencl
         if: matrix.name == 'linux'
