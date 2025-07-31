@@ -40,7 +40,7 @@ BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 # Compiler and flags
 CC = gcc
 CXX = g++
-CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(GGML_DIR)/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
+CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(BUILD_GGML)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
 LLAMA_OPTIONS = $(LLAMA) -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
 WHISPER_OPTIONS = $(WHISPER) -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF -DWHISPER_USE_SYSTEM_GGML=ON
 MINIAUDIO_OPTIONS = $(MINIAUDIO) -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
@@ -60,7 +60,7 @@ else
 	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF
 	WHISPER_OPTIONS += -DBUILD_SHARED_LIBS=OFF
 	MINIAUDIO_OPTIONS += -DBUILD_SHARED_LIBS=OFF
-	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(GGML_DIR)/lib -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
+	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_GGML)/lib -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
 endif
 WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
 MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
@@ -218,7 +218,7 @@ endif
 	$(STRIP)
 
 # Object files
-$(BUILD_DIR)/%.o: %.c
+$(BUILD_DIR)/%.o: %.c build/llama.cpp.stamp
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
 
 test: $(TARGET)
