@@ -15,6 +15,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - os: macos-latest
+            name: macos
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DGGML_LLAMAFILE=ON" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           - os: ubuntu-22.04
             arch: x86_64
             name: linux-cpu
@@ -31,9 +34,6 @@ jobs:
             arch: arm64
             name: linux-gpu
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
-          - os: macos-latest
-            name: macos
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DGGML_LLAMAFILE=ON" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           - os: windows-latest
             arch: x86_64
             name: windows-cpu
@@ -42,8 +42,6 @@ jobs:
             arch: x86_64
             name: windows-gpu
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
-          
-          # Android builds
           - os: ubuntu-latest
             arch: x86_64
             name: android
@@ -52,8 +50,7 @@ jobs:
           - os: ubuntu-latest
             arch: arm64-v8a
             name: android
-            make: PLATFORM=android ARCH=arm64-v8a
-
+            make: PLATFORM=android ARCH=arm64-v8a LLAMA="-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod"
           - os: macos-latest
             name: ios
             make: PLATFORM=ios LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
