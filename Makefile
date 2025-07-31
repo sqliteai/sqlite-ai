@@ -51,11 +51,11 @@ else
 L = -l
 endif
 ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=ON
-	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -lcommon
+LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=ON
+LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -lcommon
 else
-	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF
-	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
+LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF
+LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
 endif
 WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
 MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
