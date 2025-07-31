@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             arch: x86_64
             name: linux
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON" WHISPER="-DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
