@@ -17,24 +17,31 @@ jobs:
         include:
           - os: ubuntu-22.04
             arch: x86_64
-            name: linux
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON" WHISPER="-DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
+            name: linux-cpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_AVX2=ON"
+          - os: ubuntu-22.04
+            arch: x86_64
+            name: linux-gpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
           - os: LinuxARM64
             arch: arm64
-            name: linux
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON" WHISPER="-DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
+            name: linux-cpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_CPU_ARM_ARCH=armv8.2-a"
+          - os: LinuxARM64
+            arch: arm64
+            name: linux-gpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
           - os: macos-latest
             name: macos
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DGGML_LLAMAFILE=ON" WHISPER="-DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DGGML_LLAMAFILE=ON" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           - os: windows-latest
             arch: x86_64
-            name: windows
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON" WHISPER="-DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
-            
+            name: windows-cpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_AVX2=ON"
           - os: windows-latest
             arch: x86_64
             name: windows-gpu
-            make: LLAMA="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=ON" WHISPER="-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON -DGGML_LLAMAFILE=ON"
           
           # Android builds
           - os: ubuntu-latest
@@ -49,22 +56,14 @@ jobs:
 
           - os: macos-latest
             name: ios
-            make: PLATFORM=ios LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+            make: PLATFORM=ios LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           - os: macos-latest
             name: isim
-            make: PLATFORM=isim LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+            make: PLATFORM=isim LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
 
     defaults:
       run:
         shell: bash
-
-    env:
-      WINDOWS_BASEKIT_URL: https://registrationcenter-download.intel.com/akdlm/IRC_NAS/7cd9bba0-7aab-4e30-b3ae-2221006a4a05/intel-oneapi-base-toolkit-2025.1.1.34_offline.exe
-      WINDOWS_DPCPP_MKL: intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel:intel.oneapi.win.dnnl:intel.oneapi.win.tbb.devel
-      ONEAPI_ROOT: "C:/Program Files (x86)/Intel/oneAPI"
-      CUDA_VERSION: '12.4'
-      ROCWMMA_VERSION: '6.2.4'
-      HIP_TOOLKIT_VERSION: '24.Q3'
 
     steps:
 
@@ -110,18 +109,18 @@ jobs:
             sqlite
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
-            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-vulkan-headers' || '' }} 
-            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-vulkan-loader' || '' }} 
-            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-shaderc' || '' }} 
-            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-opencl-headers' || '' }} 
-            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-opencl-icd' || '' }} 
+            ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-vulkan-headers' || '' }} 
+            ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-vulkan-loader' || '' }} 
+            ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-shaderc' || '' }} 
+            ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-opencl-headers' || '' }} 
+            ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-opencl-icd' || '' }} 
           
       - name: linux install opencl
-        if: matrix.name == 'linux'
+        if: matrix.name == 'linux-gpu'
         run: sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
 
       - name: linux-x86_64 install vulkan
-        if: matrix.name == 'linux' && matrix.arch == 'x86_64'
+        if: matrix.name == 'linux-gpu' && matrix.arch == 'x86_64'
         run: |
           wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
@@ -138,7 +137,7 @@ jobs:
           echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
 
       - name: linux-arm64 install vulkan
-        if: matrix.name == 'linux' && matrix.arch == 'arm64'
+        if: matrix.name == 'linux-gpu' && matrix.arch == 'arm64'
         run: |
           sudo dpkg --add-architecture arm64
 
@@ -180,59 +179,6 @@ jobs:
             build/miniaudio
             build/miniaudio.stamp
           key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}
-
-      - name: download backend modules from llama.cpp releases
-        if: false #matrix.name == 'windows-gpu'
-        shell: bash
-        run: |
-          # Get the latest llama.cpp release tag
-          LLAMA_VERSION=$(git -C modules/llama.cpp describe --tags --abbrev=0)
-          echo "Downloading backend modules for llama.cpp version: $LLAMA_VERSION"
-          
-          # Create directories
-          mkdir -p build/llama.cpp/bin
-          
-          # llama.cpp releases use this naming pattern for Windows builds
-          RELEASE_URL="https://github.com/ggerganov/llama.cpp/releases/download/${LLAMA_VERSION}"
-          
-          # Download the main Windows release which contains backend DLLs
-          echo "Attempting to download llama.cpp Windows release..."
-          if curl -fsSL "${RELEASE_URL}/llama-${LLAMA_VERSION}-bin-win-x64.zip" -o llama-win.zip 2>/dev/null; then
-            echo "Downloaded llama.cpp Windows release"
-            # Extract only DLL files to the bin directory
-            unzip -j llama-win.zip "*.dll" -d build/llama.cpp/bin/ 2>/dev/null || echo "No DLLs found in main archive"
-            rm llama-win.zip
-          else
-            echo "Main Windows release not found, trying alternative download methods..."
-          fi
-          
-          # Try alternative naming patterns for GPU-specific builds
-          for gpu_variant in "cuda-cu12.2.0-x64" "hip-rocm-win-x64" "sycl-x64"; do
-            filename="llama-${LLAMA_VERSION}-bin-win-${gpu_variant}.zip"
-            echo "Trying to download ${filename}..."
-            if curl -fsSL "${RELEASE_URL}/${filename}" -o "${gpu_variant}.zip" 2>/dev/null; then
-              echo "Downloaded ${filename}"
-              unzip -j "${gpu_variant}.zip" "*.dll" -d build/llama.cpp/bin/ 2>/dev/null || echo "No DLLs in ${filename}"
-              rm "${gpu_variant}.zip"
-            fi
-          done
-          
-          # If no DLLs found, create dummy files to indicate we should build locally
-          if [ ! -d "build/llama.cpp/bin" ] || [ -z "$(ls -A build/llama.cpp/bin/ 2>/dev/null)" ]; then
-            echo "No backend modules downloaded, will build locally if needed"
-            mkdir -p build/llama.cpp/bin
-            touch build/llama.cpp/bin/.empty
-          else
-            echo "Downloaded backend modules:"
-            ls -la build/llama.cpp/bin/
-          fi
-
-      - name: copy backend modules to dist
-        if: false #matrix.name == 'windows-gpu'
-        shell: msys2 {0}
-        run: |
-          mkdir -p dist
-          cp build/llama.cpp/bin/*.dll dist/ 2>/dev/null || echo "No backend DLLs found, continuing..."
 
       - name: windows build llama.cpp
         if: matrix.os == 'windows-latest' && steps.cache-llama.outputs.cache-hit != 'true'
@@ -332,7 +278,7 @@ jobs:
           VULKAN_SDK: "C:/msys64/mingw64"
 
       - name: unix test sqlite-ai
-        if: matrix.name == 'linux' || matrix.name == 'macos'
+        if: contains(matrix.name, 'linux') || matrix.name == 'macos'
         run: make test ${{ matrix.make && matrix.make || ''}}
 
       - uses: actions/upload-artifact@v4.6.2
