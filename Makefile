@@ -241,7 +241,7 @@ build/llama.cpp.stamp:
 	touch $@
 
 build/whisper.cpp.stamp: build/llama.cpp.stamp
-	ggml_DIR=$(shell pwd)/$(BUILD_GGML) cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR) ggml_DIR=$(shell pwd)/$(BUILD_GGML)
+	export ggml_DIR=$(shell pwd)/$(BUILD_GGML) && cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
 	cmake --build $(BUILD_WHISPER) --config Release $(WHISPER_ARGS) $(ARGS)
 	touch $@
 
