@@ -110,11 +110,11 @@ jobs:
             sqlite
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-vulkan-headers
-            mingw-w64-x86_64-vulkan-loader
-            mingw-w64-x86_64-shaderc
-            mingw-w64-x86_64-opencl-headers
-            mingw-w64-x86_64-opencl-icd
+            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-vulkan-headers' }} 
+            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-vulkan-loader' }} 
+            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-shaderc' }} 
+            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-opencl-headers' }} 
+            ${{ matrix.name == 'windows' && 'mingw-w64-x86_64-opencl-icd' }} 
           
       - name: linux install opencl
         if: matrix.name == 'linux'
@@ -152,77 +152,6 @@ jobs:
 
           sudo apt-get update || true    ;# Prevent failure due to missing URLs.
           sudo apt-get install -y --no-install-recommends build-essential glslc crossbuild-essential-arm64 libvulkan-dev:arm64
-
-      - name: cache cuda toolkit
-        if: false #matrix.name == 'windows-gpu'
-        id: cache-cuda
-        uses: actions/cache@v4
-        with:
-          path: |
-            C:\Program Files\NVIDIA GPU Computing Toolkit
-          key: cuda-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ env.CUDA_VERSION }}
-
-      - name: windows install cuda
-        if: false #matrix.name == 'windows-gpu' && steps.cache-cuda.outputs.cache-hit != 'true'
-        uses: ./modules/llama.cpp/.github/actions/windows-setup-cuda
-        with:
-          cuda_version: ${{ env.CUDA_VERSION }}
-
-      - name: windows setup cuda toolkit
-        if: false #matrix.name == 'windows-gpu'
-        run: |
-          echo "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}\libnvvp" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          echo "CUDA_PATH_V12_4=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_VERSION }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-        shell: pwsh
-
-      - name: cache hip toolkit
-        if: false #matrix.name == 'windows-gpu'
-        id: cache-hip
-        uses: actions/cache@v4
-        with:
-          path: |
-            C:\Program Files\AMD\ROCm
-            rocwmma
-          key: hip-toolkit-${{ env.HIP_TOOLKIT_VERSION }}-rocwmma-${{ env.ROCWMMA_VERSION }}
-
-      - name: windows install hip toolkit
-        if: false #matrix.name == 'windows-gpu' && steps.cache-hip.outputs.cache-hit != 'true'
-        run: |
-          git clone https://github.com/rocm/rocwmma --branch rocm-${{ env.ROCWMMA_VERSION }} --depth 1
-          $ErrorActionPreference = "Stop"
-          write-host "Downloading AMD HIP SDK Installer"
-          Invoke-WebRequest -Uri "https://download.amd.com/developer/eula/rocm-hub/AMD-Software-PRO-Edition-${{ env.HIP_TOOLKIT_VERSION }}-WinSvr2022-For-HIP.exe" -OutFile "${env:RUNNER_TEMP}\rocm-install.exe"
-          write-host "Installing AMD HIP SDK"
-          Start-Process "${env:RUNNER_TEMP}\rocm-install.exe" -ArgumentList '-install' -NoNewWindow -Wait
-          write-host "Completed AMD HIP SDK installation"
-        shell: pwsh
-
-      - name: setup hip environment
-        if: false #matrix.name == 'windows-gpu'
-        run: |
-          & 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' --version
-          $HIP_PWSH = "$(Resolve-Path 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' | split-path | split-path)"
-          "HIP_PATH=$($HIP_PWSH.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "CMAKE_PREFIX_PATH=$($HIP_PWSH.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "HIP_PLATFORM=amd" | Out-File -FilePath $env:GITHUB_ENV -Append
-          # Ensure hip-config.cmake can find hipconfig
-          "PATH=$env:PATH;$($HIP_PWSH.Replace('\', '/'))/bin" | Out-File -FilePath $env:GITHUB_ENV -Append
-        shell: pwsh
-
-      - name: cache intel oneapi toolkit
-        if: false #matrix.name == 'windows-gpu'
-        id: cache-oneapi
-        uses: actions/cache@v4
-        with:
-          path: |
-            C:\Program Files (x86)\Intel\oneAPI
-          key: oneapi-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.dpcpp-mkl }}-${{ steps.submodule-hashes.outputs.basekit-url }}
-
-      - name: windows install intel oneapi toolkit for sycl
-        if: false #matrix.name == 'windows-gpu' && steps.cache-oneapi.outputs.cache-hit != 'true'
-        run: modules/llama.cpp/scripts/install-oneapi.bat $WINDOWS_BASEKIT_URL $WINDOWS_DPCPP_MKL
 
       - name: windows-gpu install ninja and sqlite
         if: matrix.name == 'windows-gpu'

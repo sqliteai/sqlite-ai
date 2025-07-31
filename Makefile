@@ -81,10 +81,6 @@ MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
 	LDFLAGS += -shared -lbcrypt -lgomp -lstdc++
-	# Add support for dynamic backend loading
-	ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-		LDFLAGS += -ldl
-	endif
 	DEF_FILE := $(BUILD_DIR)/ai.def
 	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
