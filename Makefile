@@ -37,8 +37,6 @@ BUILD_LLAMA = $(BUILD_DIR)/llama.cpp
 BUILD_WHISPER = $(BUILD_DIR)/whisper.cpp
 BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 
-ggml_DIR = $(shell pwd)/$(BUILD_GGML)
-
 # Compiler and flags
 CC = gcc
 CXX = g++
@@ -243,7 +241,7 @@ build/llama.cpp.stamp:
 	touch $@
 
 build/whisper.cpp.stamp: build/llama.cpp.stamp
-	cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
+	cmake -B $(BUILD_WHISPER) -DCMAKE_PREFIX_PATH=build/ggml -Dggml_DIR:PATH=$(pwd)/build/ggml/lib/cmake/ggml $(WHISPER_OPTIONS) $(WHISPER_DIR)
 	cmake --build $(BUILD_WHISPER) --config Release $(WHISPER_ARGS) $(ARGS)
 	touch $@
 
