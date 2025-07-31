@@ -252,7 +252,7 @@ else ifeq ($(PLATFORM),isim)
 	STRIP = strip -x -S $@
 else # linux
 	TARGET := $(DIST_DIR)/ai.so
-	LDFLAGS += -shared
+	LDFLAGS += -shared -static-libgcc -static-libstdc++
 	MINIAUDIO_LDFLAGS += -lpthread -lm
 	LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
