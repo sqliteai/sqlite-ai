@@ -222,7 +222,6 @@ $(BUILD_DIR)/%.o: %.c
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
 
 test: $(TARGET)
-	$(SQLITE3) --version
 	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
 
 # Build submodules
@@ -242,7 +241,7 @@ build/llama.cpp.stamp:
 	touch $@
 
 build/whisper.cpp.stamp: build/llama.cpp.stamp
-	ggml_DIR=$(BUILD_GGML) cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
+	CMAKE_PREFIX_PATH=$(BUILD_GGML) cmake -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
 	cmake --build $(BUILD_WHISPER) --config Release $(WHISPER_ARGS) $(ARGS)
 	touch $@
 
