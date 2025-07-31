@@ -333,7 +333,7 @@ jobs:
 
       - name: unix test sqlite-ai
         if: matrix.name == 'linux' || matrix.name == 'macos'
-        run: make test
+        run: make test ${{ matrix.make && matrix.make || ''}}
 
       - uses: actions/upload-artifact@v4.6.2
         if: always()
