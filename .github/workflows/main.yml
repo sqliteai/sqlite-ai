@@ -10,108 +10,53 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }} build${{ matrix.arch != 'arm64-v8a' && matrix.name != 'isim' && matrix.name != 'ios' && ' + test' || ''}}
-    timeout-minutes: 20
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux builds
-          - os: ubuntu-latest
-            arch: x86_64
-            name: linux-cpu
-            make: LLAMA="-DGGML_NATIVE=ON"
-          - os: ubuntu-latest
-            arch: x86_64
-            name: linux-cpu-avx2
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
-          - os: ubuntu-latest
-            arch: x86_64
-            name: linux-cpu-avx512
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX512=ON -DGGML_AVX512_VNNI=ON"
-          - os: ubuntu-latest
-            arch: x86_64
-            name: linux-openblas
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
-          - os: ubuntu-latest
-            arch: x86_64
-            name: linux-vulkan
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
-          - os: ubuntu-latest
-            arch: x86_64
-            name: linux-opencl
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
-          
-          # Linux ARM64 builds
-          - os: LinuxARM64
-            arch: arm64
-            name: linux-cpu
-            make: LLAMA="-DGGML_NATIVE=ON"
-          - os: LinuxARM64
-            arch: arm64
-            name: linux-neon
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8.2-a"
-          - os: LinuxARM64
-            arch: arm64
-            name: linux-openblas
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
-          - os: LinuxARM64
-            arch: arm64
-            name: linux-vulkan
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
-          - os: LinuxARM64
-            arch: arm64
-            name: linux-opencl
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
-          
-          # macOS builds
           - os: macos-latest
             name: macos
-            make: LLAMA="-DGGML_NATIVE=ON -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple -DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
-          
-          # Windows builds
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+          - os: ubuntu-22.04
+            arch: x86_64
+            name: linux-cpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_AVX2=ON"
+          - os: ubuntu-22.04
+            arch: x86_64
+            name: linux-gpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
+          - os: LinuxARM64
+            arch: arm64
+            name: linux-cpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_CPU_ARM_ARCH=armv8.2-a"
+          - os: LinuxARM64
+            arch: arm64
+            name: linux-gpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
           - os: windows-latest
             arch: x86_64
             name: windows-cpu
-            make: LLAMA="-DGGML_NATIVE=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_AVX2=ON"
           - os: windows-latest
             arch: x86_64
-            name: windows-cpu-avx2
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DGGML_SSE42=ON"
-          - os: windows-latest
-            arch: x86_64
-            name: windows-cpu-avx512
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_AVX512=ON -DGGML_AVX512_VNNI=ON -DGGML_AVX512_VBMI=ON -DGGML_AVX512_BF16=ON"
-          # - os: windows-latest
-          #   arch: x86_64
-          #   name: windows-openblas
-          #   make: LLAMA="-DGGML_NATIVE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
-          # - os: windows-latest
-          #   arch: x86_64
-          #   name: windows-vulkan
-          #   make: LLAMA="-DGGML_NATIVE=OFF -DGGML_VULKAN=ON"
-          # - os: windows-latest
-          #   arch: x86_64
-          #   name: windows-opencl
-          #   make: LLAMA="-DGGML_NATIVE=ON -DGGML_OPENCL=ON"
-          
-          # Android builds
-          - os: ubuntu-latest
-            arch: arm64-v8a
-            name: android
-            make: PLATFORM=android ARCH=arm64-v8a
+            name: windows-gpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
           - os: ubuntu-latest
             arch: x86_64
             name: android
             make: PLATFORM=android ARCH=x86_64
             sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
-          
-          # iOS builds
+          - os: ubuntu-latest
+            arch: arm64-v8a
+            name: android
+            make: PLATFORM=android ARCH=arm64-v8a LLAMA="-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod"
           - os: macos-latest
             name: ios
-            make: PLATFORM=ios
+            make: PLATFORM=ios LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           - os: macos-latest
             name: isim
-            make: PLATFORM=isim
+            make: PLATFORM=isim LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
 
     defaults:
       run:
@@ -123,6 +68,38 @@ jobs:
         with:
           submodules: true
 
+      - name: calculate cache version hashes for modules and dependencies
+        id: submodule-hashes
+        env:
+          MATRIX_MAKE: ${{ matrix.make && matrix.make || '' }}
+        run: |
+          LLAMA_HASH=$(git -C modules/llama.cpp rev-parse HEAD)
+          WHISPER_HASH=$(git -C modules/whisper.cpp rev-parse HEAD)
+          MINIAUDIO_HASH=$(git -C modules/miniaudio rev-parse HEAD)
+          if command -v sha256sum >/dev/null 2>&1; then
+            MAKE_HASH=$(echo "$MATRIX_MAKE" | sha256sum | cut -d' ' -f1)
+            MAKEFILE_HASH=$(sha256sum Makefile | cut -d' ' -f1)
+            DPCPP_MKL_HASH=$(echo "$WINDOWS_DPCPP_MKL" | sha256sum | cut -d' ' -f1)
+            BASEKIT_URL_HASH=$(echo "$WINDOWS_BASEKIT_URL" | sha256sum | cut -d' ' -f1)
+          elif command -v shasum >/dev/null 2>&1; then
+            MAKE_HASH=$(echo "$MATRIX_MAKE" | shasum -a 256 | cut -d' ' -f1)
+            MAKEFILE_HASH=$(shasum -a 256 Makefile | cut -d' ' -f1)
+            DPCPP_MKL_HASH=$(echo "$WINDOWS_DPCPP_MKL" | shasum -a 256 | cut -d' ' -f1)
+            BASEKIT_URL_HASH=$(echo "$WINDOWS_BASEKIT_URL" | shasum -a 256 | cut -d' ' -f1)
+          else
+            MAKE_HASH=$(echo "$MATRIX_MAKE" | openssl dgst -sha256 | cut -d' ' -f2)
+            MAKEFILE_HASH=$(openssl dgst -sha256 Makefile | cut -d' ' -f2)
+            DPCPP_MKL_HASH=$(echo "$WINDOWS_DPCPP_MKL" | openssl dgst -sha256 | cut -d' ' -f2)
+            BASEKIT_URL_HASH=$(echo "$WINDOWS_BASEKIT_URL" | openssl dgst -sha256 | cut -d' ' -f2)
+          fi
+          echo "llama=$LLAMA_HASH" >> $GITHUB_OUTPUT
+          echo "whisper=$WHISPER_HASH" >> $GITHUB_OUTPUT
+          echo "miniaudio=$MINIAUDIO_HASH" >> $GITHUB_OUTPUT
+          echo "make=$MAKE_HASH" >> $GITHUB_OUTPUT
+          echo "makefile=$MAKEFILE_HASH" >> $GITHUB_OUTPUT
+          echo "dpcpp-mkl=$DPCPP_MKL_HASH" >> $GITHUB_OUTPUT
+          echo "basekit-url=$BASEKIT_URL_HASH" >> $GITHUB_OUTPUT
+
       - uses: msys2/setup-msys2@v2.27.0
         if: matrix.os == 'windows-latest'
         with:
@@ -133,25 +110,18 @@ jobs:
             sqlite
             mingw-w64-x86_64-cc
             mingw-w64-x86_64-cmake
-            ${{ contains(matrix.name, 'vulkan') && 'mingw-w64-x86_64-vulkan-headers' || '' }}
-            ${{ contains(matrix.name, 'vulkan') && 'mingw-w64-x86_64-vulkan-loader' || '' }}
-            ${{ contains(matrix.name, 'vulkan') && 'mingw-w64-x86_64-shaderc' || '' }}
-            ${{ contains(matrix.name, 'openblas') && 'mingw-w64-x86_64-openblas' || '' }}
-            ${{ contains(matrix.name, 'opencl') && 'mingw-w64-x86_64-opencl-headers' || '' }}
-            ${{ contains(matrix.name, 'opencl') && 'mingw-w64-x86_64-opencl-icd' || '' }}
-          
-      - name: linux install openblas
-        if: matrix.name == 'linux-openblas'
-        run: |
-          sudo apt-get install -y libopenblas-dev
+            ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-vulkan-headers' || '' }} 
+            ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-vulkan-loader' || '' }} 
+            ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-shaderc' || '' }} 
+            ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-opencl-headers' || '' }} 
+            ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-opencl-icd' || '' }} 
           
       - name: linux install opencl
-        if: matrix.name == 'linux-opencl'
-        run: |
-          sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
+        if: matrix.name == 'linux-gpu'
+        run: sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
 
       - name: linux-x86_64 install vulkan
-        if: matrix.name == 'linux-vulkan' && matrix.arch == 'x86_64'
+        if: matrix.name == 'linux-gpu' && matrix.arch == 'x86_64'
         run: |
           wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
@@ -168,7 +138,7 @@ jobs:
           echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
 
       - name: linux-arm64 install vulkan
-        if: matrix.name == 'linux-vulkan' && matrix.arch == 'arm64'
+        if: matrix.name == 'linux-gpu' && matrix.arch == 'arm64'
         run: |
           sudo dpkg --add-architecture arm64
 
@@ -181,26 +151,75 @@ jobs:
           EOF
 
           sudo apt-get update || true    ;# Prevent failure due to missing URLs.
+          sudo apt-get install -y --no-install-recommends build-essential glslc crossbuild-essential-arm64 libvulkan-dev:arm64
 
-          sudo apt-get install -y --no-install-recommends \
-                  build-essential \
-                  glslc \
-                  crossbuild-essential-arm64 \
-                  libvulkan-dev:arm64
+      - name: cache llama.cpp build
+        id: cache-llama
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/ggml
+            build/llama.cpp
+            build/llama.cpp.stamp
+          key: llama-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.llama }}-${{ hashFiles('modules/llama.cpp/**') }}-${{ steps.submodule-hashes.outputs.make }}-${{ steps.submodule-hashes.outputs.makefile }}
 
-      - name: windows setup vulkan environment
-        if: matrix.name == 'windows-vulkan'
-        run: |
-          # MSYS2 Vulkan packages are already installed, just set up environment
-          echo "VULKAN_SDK=C:/msys64/mingw64" >> $GITHUB_ENV
-        shell: bash
+      - name: cache whisper.cpp build
+        id: cache-whisper
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/whisper.cpp
+            build/whisper.cpp.stamp
+          key: whisper-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.whisper }}-${{ hashFiles('modules/whisper.cpp/**') }}-${{ steps.submodule-hashes.outputs.make }}-${{ steps.submodule-hashes.outputs.makefile }}
+
+      - name: cache miniaudio build
+        id: cache-miniaudio
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/miniaudio
+            build/miniaudio.stamp
+          key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}-${{ steps.submodule-hashes.outputs.makefile }}
+
+      - name: windows build llama.cpp
+        if: matrix.os == 'windows-latest' && steps.cache-llama.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+        env:
+          VULKAN_SDK: "C:/msys64/mingw64"
+
+      - name: unix build llama.cpp
+        if: matrix.os != 'windows-latest' && steps.cache-llama.outputs.cache-hit != 'true'
+        run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: windows build whisper.cpp 
+        if: matrix.os == 'windows-latest' && steps.cache-whisper.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+        env:
+          VULKAN_SDK: "C:/msys64/mingw64"
+
+      - name: unix build whisper.cpp
+        if: matrix.os != 'windows-latest' && steps.cache-whisper.outputs.cache-hit != 'true'
+        run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: windows build miniaudio 
+        if: matrix.os == 'windows-latest' && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
+
+      - name: unix build miniaudio
+        if: matrix.os != 'windows-latest' && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai
         if: matrix.os == 'windows-latest'
         run: make extension ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
+        env:
+          VULKAN_SDK: "C:/msys64/mingw64"
 
-      - name: build sqlite-ai
+      - name: unix build sqlite-ai
         if: matrix.os != 'windows-latest'
         run: make extension ${{ matrix.make && matrix.make || ''}}
 
@@ -235,7 +254,6 @@ jobs:
             $(make test PLATFORM=$PLATFORM ARCH=$ARCH -n)
           EOF
           # remove big unused folders to avoid emulator errors
-          rm -rf build modules
           echo "::endgroup::"
 
       - name: android test sqlite-ai
@@ -247,17 +265,22 @@ jobs:
           script: |
             adb root
             adb remount
-            adb push ${{ github.workspace }}/. /data/local/tmp/
+            adb push ${{ github.workspace }}/commands.sh /data/local/tmp/
+            adb push ${{ github.workspace }}/sqlite3 /data/local/tmp/
+            adb push ${{ github.workspace }}/dist /data/local/tmp/
+            adb push ${{ github.workspace }}/Makefile /data/local/tmp/
             adb shell "sh /data/local/tmp/commands.sh"
 
       - name: windows test sqlite-ai
-        if: startsWith(matrix.name, 'windows-')
-        run: make test
+        if: matrix.os == 'windows-latest'
+        run: make test ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
+        env:
+          VULKAN_SDK: "C:/msys64/mingw64"
 
-      - name: test sqlite-ai
-        if: startsWith(matrix.name, 'linux-') || matrix.name == 'macos'
-        run: make test
+      - name: unix test sqlite-ai
+        if: contains(matrix.name, 'linux') || matrix.name == 'macos'
+        run: make test ${{ matrix.make && matrix.make || ''}}
 
       - uses: actions/upload-artifact@v4.6.2
         if: always()
