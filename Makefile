@@ -37,53 +37,11 @@ BUILD_WHISPER = $(BUILD_DIR)/whisper.cpp
 BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 
 # Compiler and flags
-ifeq ($(PLATFORM),windows)
-	# For dynamic backend loading, prefer MinGW unless explicitly using MSVC
-	ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-		# Dynamic backend loading - use MinGW by default
-		CC = gcc
-		CXX = g++
-	else
-		# Check if this is a CUDA or SYCL build that needs MSVC
-		ifneq (,$(findstring CUDA,$(LLAMA)))
-			USE_MSVC = 1
-		endif
-		ifneq (,$(findstring SYCL,$(LLAMA)))
-			USE_MSVC = 1
-			IS_SYCL = 1
-		endif
-		# HIP builds use their own Clang compiler, not MSVC
-		ifneq (,$(findstring HIP,$(LLAMA)))
-			USE_HIP_CLANG = 1
-		endif
-	endif
-	
-	ifeq ($(USE_MSVC),1)
-		CC = cl
-		CXX = cl
-		CFLAGS = /nologo /I$(SRC_DIR) /I$(LLAMA_DIR)/ggml/include /I$(LLAMA_DIR)/include /I$(WHISPER_DIR)/include /I$(MINIAUDIO_DIR)
-		OBJ_EXT = .obj
-		LIB_EXT = .lib
-	else ifeq ($(USE_HIP_CLANG),1)
-		CC = "$(HIP_PATH)/bin/clang.exe"
-		CXX = "$(HIP_PATH)/bin/clang++.exe"
-		CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
-		OBJ_EXT = .o
-		LIB_EXT = .lib
-	else
-		CC = gcc
-		CXX = g++
-		CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
-		OBJ_EXT = .o
-		LIB_EXT = .a
-	endif
-else
-	CC = gcc
-	CXX = g++
-	CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
-	OBJ_EXT = .o
-	LIB_EXT = .a
-endif
+CC = gcc
+CXX = g++
+CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
+OBJ_EXT = .o
+LIB_EXT = .a
 # Conditionally enable shared libs for backend dynamic loading
 ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
 	LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=ON -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
@@ -92,14 +50,6 @@ else
 endif
 WHISPER_OPTIONS = $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF
 MINIAUDIO_OPTIONS = $(MINIAUDIO) -DBUILD_SHARED_LIBS=OFF -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
-# Force release build for SYCL to avoid debug runtime issues
-ifneq (,$(findstring SYCL,$(LLAMA)))
-	ifeq ($(PLATFORM),windows)
-		LLAMA_OPTIONS += -DCMAKE_BUILD_TYPE=Release
-		WHISPER_OPTIONS += -DCMAKE_BUILD_TYPE=Release
-		MINIAUDIO_OPTIONS += -DCMAKE_BUILD_TYPE=Release
-	endif
-endif
 # MinGW produces .a files without lib prefix, use -l:filename.a syntax
 ifeq ($(PLATFORM),windows)
 L = -l:
@@ -108,90 +58,46 @@ else
 L = -l
 endif
 # Module-specific linker flags
-ifeq ($(USE_MSVC),1)
-	# MSVC uses .lib files directly, no -L/-l flags needed for modules
-	LLAMA_LDFLAGS = 
-	WHISPER_LDFLAGS = 
-	MINIAUDIO_LDFLAGS = 
+# MinGW/GCC uses -L/-l flags  
+ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
+	# For dynamic backend loading with shared libs, use import libraries
+	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib
 else
-	# MinGW/GCC uses -L/-l flags  
-	ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-		# For dynamic backend loading with shared libs, use import libraries
-		LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib
-	else
-		# Static linking includes CPU backend
-		LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
-	endif
-	WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
-	MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
+	# Static linking includes CPU backend
+	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
 endif
+WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
+MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
 LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%$(OBJ_EXT), $(notdir $(SRC_FILES)))
-ifeq ($(USE_MSVC),1)
-	# For dynamic backend loading with MSVC
-	ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-		LLAMA_LIBS = $(BUILD_LLAMA)/common/common.lib $(BUILD_LLAMA)/src/llama.lib $(BUILD_LLAMA)/ggml/src/ggml.lib $(BUILD_LLAMA)/ggml/src/ggml-base.lib
-	else ifeq ($(IS_SYCL),1)
-		LLAMA_LIBS = $(BUILD_LLAMA)/common/common.lib $(BUILD_LLAMA)/src/llama.lib $(BUILD_LLAMA)/ggml/src/ggml.lib $(BUILD_LLAMA)/ggml/src/ggml-base.lib
-	else
-		LLAMA_LIBS = $(BUILD_LLAMA)/common/Release/common.lib $(BUILD_LLAMA)/src/Release/llama.lib $(BUILD_LLAMA)/ggml/src/Release/ggml.lib $(BUILD_LLAMA)/ggml/src/Release/ggml-base.lib
-	endif
-	WHISPER_LIBS = $(BUILD_WHISPER)/src/Release/whisper.lib
-	MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/Release/miniaudio.lib
-else ifeq ($(USE_HIP_CLANG),1)
-	# HIP builds with MSVC create .lib files in Release/ directories
-	LLAMA_LIBS = $(BUILD_LLAMA)/common/common.lib $(BUILD_LLAMA)/src/llama.lib $(BUILD_LLAMA)/ggml/src/ggml.lib $(BUILD_LLAMA)/ggml/src/ggml-base.lib
-	WHISPER_LIBS = $(BUILD_WHISPER)/src/Release/whisper.lib
-	MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/Release/miniaudio.lib
+# MinGW/GCC builds
+ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
+	# For dynamic backend loading with shared library build, use .lib files
+	LLAMA_LIBS = $(BUILD_LLAMA)/common/common.lib $(BUILD_LLAMA)/ggml/src/ggml.lib $(BUILD_LLAMA)/ggml/src/ggml-base.lib $(BUILD_LLAMA)/src/llama.lib
 else
-	# MinGW/GCC builds
-	ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-		# For dynamic backend loading with shared library build, use .lib files
-		LLAMA_LIBS = $(BUILD_LLAMA)/common/common.lib $(BUILD_LLAMA)/ggml/src/ggml.lib $(BUILD_LLAMA)/ggml/src/ggml-base.lib $(BUILD_LLAMA)/src/llama.lib
-	else
-		# Static linking includes CPU backend
-		LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/ggml/src/libggml.a $(BUILD_LLAMA)/ggml/src/libggml-base.a $(BUILD_LLAMA)/ggml/src/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
-	endif
-	WHISPER_LIBS = $(BUILD_WHISPER)/src/libwhisper.a
-	MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
+	# Static linking includes CPU backend
+	LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/ggml/src/libggml.a $(BUILD_LLAMA)/ggml/src/libggml-base.a $(BUILD_LLAMA)/ggml/src/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
 endif
+WHISPER_LIBS = $(BUILD_WHISPER)/src/libwhisper.a
+MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
-	ifeq ($(USE_MSVC),1)
-		LDFLAGS += /DLL /NODEFAULTLIB:LIBCMT
-		MSVC_LIBS += bcrypt.lib ucrt.lib msvcrt.lib legacy_stdio_definitions.lib
-		# Add support for dynamic backend loading
-		ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-			MSVC_LIBS += kernel32.lib
-		endif
-		DEF_FILE := $(BUILD_DIR)/ai.def
-		STRIP = echo "No stripping needed for MSVC"
-	else ifeq ($(USE_HIP_CLANG),1)
-		LDFLAGS += -shared -lbcrypt
-		# Add support for dynamic backend loading
-		ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-			LDFLAGS += -ldl
-		endif
-		DEF_FILE := $(BUILD_DIR)/ai.def
-		STRIP = strip --strip-unneeded $@
-	else
-		LDFLAGS += -shared -lbcrypt -lgomp -lstdc++
-		# Fix for GGML_STATIC Windows builds - resolve symbol conflicts
-		ifneq (,$(findstring GGML_STATIC=ON,$(LLAMA)))
-			LDFLAGS += -Wl,--allow-multiple-definition
-		endif
-		# Add support for dynamic backend loading
-		ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-			LDFLAGS += -ldl
-		endif
-		DEF_FILE := $(BUILD_DIR)/ai.def
-		STRIP = strip --strip-unneeded $@
+	LDFLAGS += -shared -lbcrypt -lgomp -lstdc++
+	# Fix for GGML_STATIC Windows builds - resolve symbol conflicts
+	ifneq (,$(findstring GGML_STATIC=ON,$(LLAMA)))
+		LDFLAGS += -Wl,--allow-multiple-definition
 	endif
+	# Add support for dynamic backend loading
+	ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
+		LDFLAGS += -ldl
+	endif
+	DEF_FILE := $(BUILD_DIR)/ai.def
+	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
 	LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-metal/libggml-metal.a $(BUILD_LLAMA)/ggml/src/ggml-blas/libggml-blas.a
@@ -306,17 +212,11 @@ ifneq (,$(findstring CUDA,$(LLAMA)))
 			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda $(L)ggml-cuda$(A) -lcuda -lcublas -lcublasLt -lcudart -ldl
 			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/libggml-cuda.a
 		else
-			ifeq ($(USE_MSVC),1)
-				# MSVC CUDA build - use .lib files and MSVC linker syntax
-				LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-cuda/Release/ggml-cuda.lib
-				MSVC_LIBS += "$(subst \,/,$(CUDA_PATH))/lib/x64/cuda.lib" "$(subst \,/,$(CUDA_PATH))/lib/x64/cudart.lib" "$(subst \,/,$(CUDA_PATH))/lib/x64/cublas.lib" "$(subst \,/,$(CUDA_PATH))/lib/x64/cublasLt.lib"
-			else
-				# MinGW CUDA build - use original approach
-				LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common/Release -L./$(BUILD_LLAMA)/ggml/src/Release -L./$(BUILD_LLAMA)/src/Release -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda/Release -L"$(CUDA_PATH)/lib/x64" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-cuda.lib -lcuda -lcudart
-				WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -L./$(BUILD_WHISPER)/src/Release -lwhisper
-				MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -L./$(BUILD_MINIAUDIO)/Release -lminiaudio
-				$(error Windows MinGW CUDA build is not supported yet)
-			endif
+			# MinGW CUDA build - use original approach
+			LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common/Release -L./$(BUILD_LLAMA)/ggml/src/Release -L./$(BUILD_LLAMA)/src/Release -L./$(BUILD_LLAMA)/ggml/src/ggml-cuda/Release -L"$(CUDA_PATH)/lib/x64" $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib $(L)ggml-cuda.lib -lcuda -lcudart
+			WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -L./$(BUILD_WHISPER)/src/Release -lwhisper
+			MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -L./$(BUILD_MINIAUDIO)/Release -lminiaudio
+			$(error Windows MinGW CUDA build is not supported yet)
 		endif
 	endif
 endif
@@ -329,17 +229,8 @@ ifneq (,$(findstring HIP,$(LLAMA)))
 		else
 			# Windows HIP build - HIP libraries are built as .lib files in Release/ directories
 			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-hip/ggml-hip.lib
-			ifeq ($(USE_HIP_CLANG),1)
-				# HIP Clang linker flags for .lib files
-				WHISPER_LDFLAGS =
-				#-L./$(BUILD_WHISPER)/src/Release -lwhisper
-				MINIAUDIO_LDFLAGS =
-				#-L./$(BUILD_MINIAUDIO)/Release -lminiaudio
-				LLAMA_LDFLAGS = -L"$(HIP_PATH)/lib" -lamdhip64 -lrocblas -lhipblas
-			else
-				# MinGW linker flags (should not be used for HIP)
-				LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip -L"$(HIP_PATH)/lib" -lggml-hip -lamdhip64 -lrocblas
-			endif
+			# MinGW linker flags for HIP
+			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-hip -L"$(HIP_PATH)/lib" -lggml-hip -lamdhip64 -lrocblas
 		endif
 	endif
 endif
@@ -351,8 +242,7 @@ ifneq (,$(findstring SYCL,$(LLAMA)))
 			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-sycl/libggml-sycl.a
 		else
 			LLAMA_LIBS += $(BUILD_LLAMA)/ggml/src/ggml-sycl/ggml-sycl.lib
-			#LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-sycl -lggml-sycl -lsycl
-			MSVC_LIBS += sycl.lib
+			LLAMA_LDFLAGS += -L./$(BUILD_LLAMA)/ggml/src/ggml-sycl -lggml-sycl -lsycl
 		endif
 	endif
 endif
@@ -374,34 +264,17 @@ all: $(TARGET)
 
 # Loadable library
 $(TARGET): $(OBJ_FILES) $(DEF_FILE) $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS)
-ifeq ($(USE_MSVC),1)
-	@echo "CUDA_PATH = $(CUDA_PATH)"
-	@echo "MSVC_LIBS = $(MSVC_LIBS)"
-	@printf '/nologo %s /DEF:%s /OUT:%s %s %s %s %s %s\n' '$(LDFLAGS)' '$(DEF_FILE)' '$@' '$(OBJ_FILES)' '$(LLAMA_LIBS)' '$(WHISPER_LIBS)' '$(MINIAUDIO_LIBS)' '$(MSVC_LIBS)' > $(BUILD_DIR)/link.rsp
-	@echo "Response file contents:"
-	@cat $(BUILD_DIR)/link.rsp
-	"$(VCToolsInstallDir)bin\Hostx64\x64\link.exe" @$(BUILD_DIR)/link.rsp
-else ifeq ($(USE_HIP_CLANG),1)
-	$(CXX) $(OBJ_FILES) -o $@ $(LLAMA_LIBS) $(WHISPER_LIBS) $(MINIAUDIO_LIBS) $(LDFLAGS)
-else
 	$(CXX) $(OBJ_FILES) $(DEF_FILE) -o $@ $(LDFLAGS)
 ifeq ($(PLATFORM),windows)
 	# Generate import library for Windows
 	dlltool -D $@ -d $(DEF_FILE) -l $(DIST_DIR)/ai.lib
-endif
 endif
 	# Strip debug symbols
 	$(STRIP)
 
 # Object files
 $(BUILD_DIR)/%$(OBJ_EXT): %.c
-ifeq ($(USE_MSVC),1)
-	$(CC) $(CFLAGS) /O2 /c $< /Fo:$@
-else ifeq ($(USE_HIP_CLANG),1)
-	$(CC) $(CFLAGS) -O3 -c $< -o $@
-else
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
-endif
 
 test: $(TARGET)
 	$(SQLITE3) --version
