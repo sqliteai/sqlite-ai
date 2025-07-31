@@ -78,14 +78,17 @@ jobs:
           MINIAUDIO_HASH=$(git -C modules/miniaudio rev-parse HEAD)
           if command -v sha256sum >/dev/null 2>&1; then
             MAKE_HASH=$(echo "$MATRIX_MAKE" | sha256sum | cut -d' ' -f1)
+            MAKEFILE_HASH=$(sha256sum Makefile | cut -d' ' -f1)
             DPCPP_MKL_HASH=$(echo "$WINDOWS_DPCPP_MKL" | sha256sum | cut -d' ' -f1)
             BASEKIT_URL_HASH=$(echo "$WINDOWS_BASEKIT_URL" | sha256sum | cut -d' ' -f1)
           elif command -v shasum >/dev/null 2>&1; then
             MAKE_HASH=$(echo "$MATRIX_MAKE" | shasum -a 256 | cut -d' ' -f1)
+            MAKEFILE_HASH=$(shasum -a 256 Makefile | cut -d' ' -f1)
             DPCPP_MKL_HASH=$(echo "$WINDOWS_DPCPP_MKL" | shasum -a 256 | cut -d' ' -f1)
             BASEKIT_URL_HASH=$(echo "$WINDOWS_BASEKIT_URL" | shasum -a 256 | cut -d' ' -f1)
           else
             MAKE_HASH=$(echo "$MATRIX_MAKE" | openssl dgst -sha256 | cut -d' ' -f2)
+            MAKEFILE_HASH=$(openssl dgst -sha256 Makefile | cut -d' ' -f2)
             DPCPP_MKL_HASH=$(echo "$WINDOWS_DPCPP_MKL" | openssl dgst -sha256 | cut -d' ' -f2)
             BASEKIT_URL_HASH=$(echo "$WINDOWS_BASEKIT_URL" | openssl dgst -sha256 | cut -d' ' -f2)
           fi
@@ -93,6 +96,7 @@ jobs:
           echo "whisper=$WHISPER_HASH" >> $GITHUB_OUTPUT
           echo "miniaudio=$MINIAUDIO_HASH" >> $GITHUB_OUTPUT
           echo "make=$MAKE_HASH" >> $GITHUB_OUTPUT
+          echo "makefile=$MAKEFILE_HASH" >> $GITHUB_OUTPUT
           echo "dpcpp-mkl=$DPCPP_MKL_HASH" >> $GITHUB_OUTPUT
           echo "basekit-url=$BASEKIT_URL_HASH" >> $GITHUB_OUTPUT
 
@@ -157,7 +161,7 @@ jobs:
             build/ggml
             build/llama.cpp
             build/llama.cpp.stamp
-          key: llama-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.llama }}-${{ hashFiles('modules/llama.cpp/**') }}-${{ steps.submodule-hashes.outputs.make }}
+          key: llama-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.llama }}-${{ hashFiles('modules/llama.cpp/**') }}-${{ steps.submodule-hashes.outputs.make }}-${{ steps.submodule-hashes.outputs.makefile }}
 
       - name: cache whisper.cpp build
         id: cache-whisper
@@ -166,7 +170,7 @@ jobs:
           path: |
             build/whisper.cpp
             build/whisper.cpp.stamp
-          key: whisper-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.whisper }}-${{ hashFiles('modules/whisper.cpp/**') }}-${{ steps.submodule-hashes.outputs.make }}
+          key: whisper-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.whisper }}-${{ hashFiles('modules/whisper.cpp/**') }}-${{ steps.submodule-hashes.outputs.make }}-${{ steps.submodule-hashes.outputs.makefile }}
 
       - name: cache miniaudio build
         id: cache-miniaudio
@@ -175,7 +179,7 @@ jobs:
           path: |
             build/miniaudio
             build/miniaudio.stamp
-          key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}
+          key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}-${{ steps.submodule-hashes.outputs.makefile }}
 
       - name: windows build llama.cpp
         if: matrix.os == 'windows-latest' && steps.cache-llama.outputs.cache-hit != 'true'
