@@ -241,7 +241,7 @@ build/llama.cpp.stamp:
 	touch $@
 
 build/whisper.cpp.stamp: build/llama.cpp.stamp
-	cmake -DCMAKE_PREFIX_PATH=$(shell pwd)/$(BUILD_GGML) -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
+	cmake -Dggml_DIR=$(shell pwd)/$(BUILD_GGML)/lib/cmake/ggml -B $(BUILD_WHISPER) $(WHISPER_OPTIONS) $(WHISPER_DIR)
 	cmake --build $(BUILD_WHISPER) --config Release $(WHISPER_ARGS) $(ARGS)
 	touch $@
 
