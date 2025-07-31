@@ -40,8 +40,6 @@ BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 CC = gcc
 CXX = g++
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
-OBJ_EXT = .o
-LIB_EXT = .a
 # Conditionally enable shared libs for backend dynamic loading
 ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
 	LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=ON -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
@@ -72,7 +70,7 @@ LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
 
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
-OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%$(OBJ_EXT), $(notdir $(SRC_FILES)))
+OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC_FILES)))
 # MinGW/GCC builds
 ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
 	# For dynamic backend loading with shared library build, use .lib files
@@ -232,7 +230,7 @@ endif
 	$(STRIP)
 
 # Object files
-$(BUILD_DIR)/%$(OBJ_EXT): %.c
+$(BUILD_DIR)/%.o: %.c
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
 
 test: $(TARGET)
