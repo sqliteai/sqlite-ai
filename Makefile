@@ -181,6 +181,10 @@ ifeq ($(PLATFORM),windows)
 		STRIP = strip --strip-unneeded $@
 	else
 		LDFLAGS += -shared -lbcrypt -lgomp -lstdc++
+		# Fix for GGML_STATIC Windows builds - resolve symbol conflicts
+		ifneq (,$(findstring GGML_STATIC=ON,$(LLAMA)))
+			LDFLAGS += -Wl,--allow-multiple-definition
+		endif
 		# Add support for dynamic backend loading
 		ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
 			LDFLAGS += -ldl
