@@ -45,17 +45,17 @@ WHISPER_OPTIONS = $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OF
 MINIAUDIO_OPTIONS = $(MINIAUDIO) -DBUILD_SHARED_LIBS=OFF -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
 # MinGW produces .a files without lib prefix, use -l:filename.a syntax
 ifeq ($(PLATFORM),windows)
-L = -l:
-A = .a
+	L = -l:
+	A = .a
 else
-L = -l
+	L = -l
 endif
 ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=ON
-LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -lcommon
+	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=ON
+	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -lcommon
 else
-LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF
-LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
+	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF
+	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
 endif
 WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
 MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio
