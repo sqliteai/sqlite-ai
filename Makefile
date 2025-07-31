@@ -40,12 +40,7 @@ BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 CC = gcc
 CXX = g++
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(LLAMA_DIR)/ggml/include -I$(LLAMA_DIR)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
-# Conditionally enable shared libs for backend dynamic loading
-ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-	LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=ON -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
-else
-	LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
-endif
+LLAMA_OPTIONS = $(LLAMA) -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
 WHISPER_OPTIONS = $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF
 MINIAUDIO_OPTIONS = $(MINIAUDIO) -DBUILD_SHARED_LIBS=OFF -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
 # MinGW produces .a files without lib prefix, use -l:filename.a syntax
@@ -55,13 +50,11 @@ A = .a
 else
 L = -l
 endif
-# Module-specific linker flags
-# MinGW/GCC uses -L/-l flags  
 ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-	# For dynamic backend loading with shared libs, use import libraries
-	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src $(L)common.lib $(L)llama.lib $(L)ggml.lib $(L)ggml-base.lib
+	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=ON
+	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -lcommon
 else
-	# Static linking includes CPU backend
+	LLAMA_OPTIONS += -DBUILD_SHARED_LIBS=OFF
 	LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_LLAMA)/ggml/src -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
 endif
 WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
@@ -73,10 +66,8 @@ SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC_FILES)))
 # MinGW/GCC builds
 ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
-	# For dynamic backend loading with shared library build, use .lib files
-	LLAMA_LIBS = $(BUILD_LLAMA)/common/common.lib $(BUILD_LLAMA)/ggml/src/ggml.lib $(BUILD_LLAMA)/ggml/src/ggml-base.lib $(BUILD_LLAMA)/src/llama.lib
+	LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/bin/ggml.dll $(BUILD_LLAMA)/bin/ggml-base.dll $(BUILD_LLAMA)/bin/libllama.dll $(BUILD_LLAMA)/bin/ggml-cpu.dll
 else
-	# Static linking includes CPU backend
 	LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_LLAMA)/ggml/src/libggml.a $(BUILD_LLAMA)/ggml/src/libggml-base.a $(BUILD_LLAMA)/ggml/src/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
 endif
 WHISPER_LIBS = $(BUILD_WHISPER)/src/libwhisper.a
@@ -86,10 +77,6 @@ MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
 	LDFLAGS += -shared -lbcrypt -lgomp -lstdc++
-	# Fix for GGML_STATIC Windows builds - resolve symbol conflicts
-	ifneq (,$(findstring GGML_STATIC=ON,$(LLAMA)))
-		LDFLAGS += -Wl,--allow-multiple-definition
-	endif
 	# Add support for dynamic backend loading
 	ifneq (,$(findstring GGML_BACKEND_DL=ON,$(LLAMA)))
 		LDFLAGS += -ldl
