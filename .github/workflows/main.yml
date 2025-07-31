@@ -113,13 +113,12 @@ jobs:
             mingw-w64-x86_64-vulkan-headers
             mingw-w64-x86_64-vulkan-loader
             mingw-w64-x86_64-shaderc
-            mingw-w64-x86_64-openblas
             mingw-w64-x86_64-opencl-headers
             mingw-w64-x86_64-opencl-icd
           
-      - name: linux install openblas and opencl
+      - name: linux install opencl
         if: matrix.name == 'linux'
-        run: sudo apt-get install -y libopenblas-dev opencl-headers ocl-icd-opencl-dev
+        run: sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
 
       - name: linux-x86_64 install vulkan
         if: matrix.name == 'linux' && matrix.arch == 'x86_64'
