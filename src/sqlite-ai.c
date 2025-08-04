@@ -132,6 +132,9 @@ typedef struct {
     // whisper
     struct whisper_context      *whisper;
     
+    // embedding
+    llama_seq_id                sequence_id;        // some models requires to be unique across multiple calls to llm_embed_generate
+    
     // chat
     struct {
         char                    uuid[UUID_STR_MAXLEN];
@@ -504,21 +507,22 @@ static void llm_embed_normalize (const float *src, float *dest, int dim) {
 
 static void llm_embed_generate_run (sqlite3_context *context, const char *text, int32_t text_len) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    struct llama_model *model = ai->model;
     
     // sanity check model
-    if (llama_model_has_encoder(ai->model) && llama_model_has_decoder(ai->model)) {
+    if (llama_model_has_encoder(model) && llama_model_has_decoder(model)) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Computing embeddings in encoder-decoder models is not supported");
         return;
     }
     
     // sanity check model type (decode is used to create embeddings)
-    if (llama_model_has_decoder(ai->model) == false) {
+    if (llama_model_has_decoder(model) == false) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Model does not support decoding (required for embedding)");
         return;
     }
     
     // sanity check vocab
-    const struct llama_vocab *vocab = llama_model_get_vocab(ai->model);
+    const struct llama_vocab *vocab = llama_model_get_vocab(model);
     if (!vocab) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Failed to extract vocabulary from the model");
         return;
@@ -535,7 +539,7 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     llama_set_embeddings(ctx, true);
     
     // sanity check tokens
-    const int n_ctx_train = llama_model_n_ctx_train(ai->model);
+    const int n_ctx_train = llama_model_n_ctx_train(model);
     const int n_ctx = llama_n_ctx(ctx);
     if (n_ctx > n_ctx_train) {
         char buffer[512];
@@ -595,12 +599,11 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     
     // set up batch for processing
     llama_batch batch = llama_batch_init(n_tokens, 0, 1);
-    llama_seq_id seq_id = 0;
     for (int i = 0; i < n_tokens; ++i) {
         batch.token[batch.n_tokens] = tokens[i];
         batch.pos[batch.n_tokens] = i;
         batch.n_seq_id[batch.n_tokens]= 1;
-        batch.seq_id[batch.n_tokens][0] = seq_id;
+        batch.seq_id[batch.n_tokens][0] = ai->sequence_id++;
         batch.logits[batch.n_tokens]  = true;
         batch.n_tokens++;
     }
@@ -608,11 +611,12 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     // do real processing
     llama_memory_t memory = llama_get_memory(ctx);
     int32_t rc = (memory) ? llama_decode(ctx, batch) : llama_encode(ctx, batch);
+     
     if (rc < 0) {
         sqlite3_free(tokens);
         sqlite3_free(embedding);
         llama_batch_free(batch);
-        sqlite_context_result_error(context, SQLITE_ERROR, "Model decode failed during embedding generation");
+        sqlite_context_result_error(context, SQLITE_ERROR, "Model decode failed during embedding generation (%d)", rc);
         return;
     }
     
@@ -635,11 +639,11 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     
     // check if JSON output is set
     if (ai->options.json_output) {
-        sqlite3_str *s = sqlite3_str_new(NULL);
+        sqlite3_str *s = sqlite3_str_new(sqlite3_context_db_handle(context));
         sqlite3_str_appendchar(s, 1, '[');
         for (int i = 0; i < dimension; i++) {
             if (i != 0) sqlite3_str_appendchar(s, 1, ',');
-            sqlite3_str_appendf(s, "%f", embedding[i]);
+            sqlite3_str_appendf(s, "%.6g", embedding[i]);
         }
         sqlite3_str_appendchar(s, 1, ']');
         
