@@ -66,9 +66,11 @@ MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
-	LDFLAGS += -lbcrypt -lgomp -lstdc++ -shared
+	LDFLAGS += -lbcrypt -lstdc++ -shared
 	DEF_FILE := $(BUILD_DIR)/ai.def
-	STRIP = echo "Windows skip stripping" #strip --strip-unneeded $@
+	LLAMA_OPTIONS += -DGGML_OPENMP=OFF
+	WHISPER_OPTIONS += -DGGML_OPENMP=OFF
+	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
 	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
@@ -211,11 +213,7 @@ test: $(TARGET)
 
 # Build submodules
 ifeq ($(PLATFORM),windows)
-    ifneq (,$(findstring Ninja,$(LLAMA)))
-        ARGS = -j $(CPUS)
-    else
-        ARGS = --parallel $(CPUS)
-    endif
+    ARGS = --parallel $(CPUS)
 else
     ARGS = -- -j$(CPUS)
 endif
