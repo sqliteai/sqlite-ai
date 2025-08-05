@@ -66,10 +66,8 @@ MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
-	LDFLAGS += -lbcrypt -static-libgcc -Wl,--push-state,-Bstatic,-lstdc++,-lwinpthread,--pop-state -shared
+	LDFLAGS += -lbcrypt -lgomp -static-libgcc -Wl,--push-state,-Bstatic,-lstdc++,-lwinpthread,--pop-state -shared
 	DEF_FILE := $(BUILD_DIR)/ai.def
-	LLAMA_OPTIONS += -DGGML_OPENMP=OFF
-	WHISPER_OPTIONS += -DGGML_OPENMP=OFF
 	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
