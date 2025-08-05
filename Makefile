@@ -68,7 +68,7 @@ ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
 	LDFLAGS += -shared -lbcrypt -lgomp -lstdc++
 	DEF_FILE := $(BUILD_DIR)/ai.def
-	STRIP = strip --strip-unneeded $@
+	STRIP = echo "Windows skip stripping" #strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
 	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
