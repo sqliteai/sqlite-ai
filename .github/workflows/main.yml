@@ -34,11 +34,11 @@ jobs:
             arch: arm64
             name: linux-gpu
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
-          - os: windows-latest
+          - os: windows-2019
             arch: x86_64
             name: windows-cpu
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_AVX2=ON"
-          - os: windows-latest
+          - os: windows-2019
             arch: x86_64
             name: windows-gpu
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
@@ -101,7 +101,7 @@ jobs:
           echo "basekit-url=$BASEKIT_URL_HASH" >> $GITHUB_OUTPUT
 
       - uses: msys2/setup-msys2@v2.27.0
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2019'
         with:
           msystem: mingw64
           install: >-
@@ -182,45 +182,45 @@ jobs:
           key: miniaudio-${{ matrix.name }}-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.submodule-hashes.outputs.miniaudio }}-${{ hashFiles('modules/miniaudio/**') }}-${{ steps.submodule-hashes.outputs.make }}-${{ steps.submodule-hashes.outputs.makefile }}
 
       - name: windows build llama.cpp
-        if: matrix.os == 'windows-latest' && steps.cache-llama.outputs.cache-hit != 'true'
+        if: matrix.os == 'windows-2019' && steps.cache-llama.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
         env:
           VULKAN_SDK: "C:/msys64/mingw64"
 
       - name: unix build llama.cpp
-        if: matrix.os != 'windows-latest' && steps.cache-llama.outputs.cache-hit != 'true'
+        if: matrix.os != 'windows-2019' && steps.cache-llama.outputs.cache-hit != 'true'
         run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build whisper.cpp 
-        if: matrix.os == 'windows-latest' && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: matrix.os == 'windows-2019' && steps.cache-whisper.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
         env:
           VULKAN_SDK: "C:/msys64/mingw64"
 
       - name: unix build whisper.cpp
-        if: matrix.os != 'windows-latest' && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: matrix.os != 'windows-2019' && steps.cache-whisper.outputs.cache-hit != 'true'
         run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build miniaudio 
-        if: matrix.os == 'windows-latest' && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: matrix.os == 'windows-2019' && steps.cache-miniaudio.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: unix build miniaudio
-        if: matrix.os != 'windows-latest' && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: matrix.os != 'windows-2019' && steps.cache-miniaudio.outputs.cache-hit != 'true'
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2019'
         run: make extension ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
         env:
           VULKAN_SDK: "C:/msys64/mingw64"
 
       - name: unix build sqlite-ai
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-2019'
         run: make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: macos install sqlite3 without SQLITE_OMIT_LOAD_EXTENSION
@@ -272,7 +272,7 @@ jobs:
             adb shell "sh /data/local/tmp/commands.sh"
 
       - name: windows test sqlite-ai
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2019'
         run: make test ${{ matrix.make && matrix.make || ''}}
         shell: msys2 {0}
         env:
