@@ -66,7 +66,7 @@ MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
-	LDFLAGS += -lbcrypt -lgomp -static-libgcc -Wl,--push-state,-Bstatic,-lstdc++,-lwinpthread,--pop-state -shared
+	LDFLAGS += -lbcrypt -static-libgcc -Wl,--push-state,-Bstatic,-lstdc++,-lwinpthread,-lgomp,--pop-state -shared
 	DEF_FILE := $(BUILD_DIR)/ai.def
 	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
