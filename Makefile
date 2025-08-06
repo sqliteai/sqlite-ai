@@ -66,7 +66,7 @@ MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 # Platform-specific settings
 ifeq ($(PLATFORM),windows)
 	TARGET := $(DIST_DIR)/ai.dll
-	LDFLAGS += -shared -lbcrypt -lgomp -lstdc++
+	LDFLAGS += -lbcrypt -static-libgcc -Wl,--push-state,-Bstatic,-lgomp,-lstdc++,-lwinpthread,--pop-state -shared
 	DEF_FILE := $(BUILD_DIR)/ai.def
 	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
@@ -211,11 +211,7 @@ test: $(TARGET)
 
 # Build submodules
 ifeq ($(PLATFORM),windows)
-    ifneq (,$(findstring Ninja,$(LLAMA)))
-        ARGS = -j $(CPUS)
-    else
-        ARGS = --parallel $(CPUS)
-    endif
+    ARGS = --parallel $(CPUS)
 else
     ARGS = -- -j$(CPUS)
 endif
