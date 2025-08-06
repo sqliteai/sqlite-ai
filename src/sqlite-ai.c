@@ -205,7 +205,11 @@ void llm_set_model_options (struct llama_model_params *model_params, llm_options
 }
 
 void llm_set_context_options (struct llama_context_params *llama_context, llm_options *options) {
-    if (options->generate_embedding) llama_context->embeddings = true;
+    if (options->generate_embedding) {
+        llama_context->embeddings = true;
+        llama_context->pooling_type = LLAMA_POOLING_TYPE_LAST;
+    }
+    
     if (options->context_size) {
         llama_context->n_ctx = options->context_size;
         llama_context->n_batch = options->context_size;
@@ -547,18 +551,6 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         ai_logger(GGML_LOG_LEVEL_WARN, buffer, sqlite3_context_db_handle(context));
     }
     
-    /*
-    if (llama_vocab_get_add_sep(vocab)) {
-        const char *sep = llama_vocab_get_text(vocab, llama_vocab_sep(vocab));
-        printf("sep: %s\n", sep);
-    }
-    
-    if (llama_vocab_get_add_eos(vocab)) {
-        const char *eos = llama_vocab_get_text(vocab, llama_vocab_eos(vocab));
-        printf("eos: %s\n", eos);
-    }
-     */
-    
     // sanity check embedding memory
     int dimension = llama_model_n_embd(llama_get_model(ctx));
     float *embedding = (float *)sqlite3_malloc64(sizeof(float) * dimension);
@@ -568,7 +560,7 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     }
     
     // get token count
-    int32_t n_tokens = -llama_tokenize(vocab, text, text_len, NULL, 0, true, false);
+    int32_t n_tokens = -llama_tokenize(vocab, text, text_len, NULL, 0, true, true);
     if (n_tokens == 0) {
         sqlite3_free(embedding);
         sqlite_context_result_error(context, SQLITE_ERROR, "Tokenization failed: returned %d tokens", n_tokens);
@@ -599,16 +591,18 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     
     // set up batch for processing
     llama_batch batch = llama_batch_init(n_tokens, 0, 1);
+    llama_seq_id sequence_id = ai->sequence_id;
     for (int i = 0; i < n_tokens; ++i) {
         batch.token[batch.n_tokens] = tokens[i];
         batch.pos[batch.n_tokens] = i;
-        batch.n_seq_id[batch.n_tokens]= 1;
-        batch.seq_id[batch.n_tokens][0] = ai->sequence_id++;
-        batch.logits[batch.n_tokens]  = true;
+        batch.n_seq_id[batch.n_tokens] = 1;
+        batch.seq_id[batch.n_tokens][0] = sequence_id;
+        batch.logits[batch.n_tokens]  = i == (n_tokens - 1);
         batch.n_tokens++;
     }
+    ai->sequence_id++;
     
-    // do real processing
+    // run model (do real processing)
     llama_memory_t memory = llama_get_memory(ctx);
     int32_t rc = (memory) ? llama_decode(ctx, batch) : llama_encode(ctx, batch);
      
@@ -620,11 +614,11 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         return;
     }
     
-    // retrieve embeddings
+    // retrieve embeddings (context set to LLAMA_POOLING_TYPE_LAST in llama_init_from_model)
     const float *result = NULL;
     const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
     if (pooling_type == LLAMA_POOLING_TYPE_NONE) result = llama_get_embeddings(ctx);
-    else result = llama_get_embeddings_seq(ctx, 0);
+    else result = llama_get_embeddings_seq(ctx, sequence_id);
     
     if (result == NULL) {
         sqlite3_free(tokens);
@@ -636,6 +630,11 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     
     // check if normalization is needed (default true)
     (ai->options.normalize_embedding) ? llm_embed_normalize(result, embedding, dimension) : memcpy(embedding, result, sizeof(float) * dimension);
+    
+    if (memory) {
+        llama_memory_clear(memory, true);
+        llama_memory_seq_rm(memory, sequence_id, 0, -1);
+    }
     
     // check if JSON output is set
     if (ai->options.json_output) {
