@@ -206,6 +206,7 @@ void llm_set_model_options (struct llama_model_params *model_params, llm_options
 
 void llm_set_context_options (struct llama_context_params *llama_context, llm_options *options) {
     if (options->generate_embedding) {
+        // https://github.com/ggml-org/llama.cpp/discussions/15093
         llama_context->embeddings = true;
         llama_context->pooling_type = LLAMA_POOLING_TYPE_LAST;
     }
