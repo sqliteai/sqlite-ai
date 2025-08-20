@@ -50,6 +50,8 @@ SQLITE_EXTENSION_INIT1
 
 #define OPTION_KEY_GENERATE_EMBEDDING           "generate_embedding"
 #define OPTION_KEY_NORMALIZE_EMBEDDING          "normalize_embedding"
+#define OPTION_KEY_POOLING_TYPE                 "pooling_type"
+#define OPTION_KEY_ATTENTION_TYPE               "attention_type"
 #define OPTION_KEY_MAX_TOKENS                   "max_tokens"
 #define OPTION_KEY_JSON_OUTPUT                  "json_output"
 #define OPTION_KEY_GPU_LAYERS                   "gpu_layers"
@@ -70,7 +72,7 @@ typedef struct {
     bool                        log_info;           // flag to enable/disable the logging of info
     
     // ** CONTEXT **
-    uint32_t                    context_size;       // set both n_ctx and n_batch
+    uint32_t                    context_size;       // set both n_ctx and n_batch  (*** DONE ***)
     uint32_t                    n_ctx;              // text context, 0 = from model
     uint32_t                    n_batch;            // logical maximum batch size that can be submitted to llama_decode
     uint32_t                    n_ubatch;           // physical maximum batch size
@@ -78,8 +80,8 @@ typedef struct {
     int32_t                     n_threads;          // number of threads to use for generation
     int32_t                     n_threads_batch;    // number of threads to use for batch processing
     enum llama_rope_scaling_type rope_scaling_type; // RoPE scaling type, from `enum llama_rope_scaling_type`
-    enum llama_pooling_type     pooling_type;       // whether to pool (sum) embedding results by sequence id
-    enum llama_attention_type   attention_type;     // attention type to use for embeddings
+    enum llama_pooling_type     pooling_type;       // whether to pool (sum) embedding results by sequence id (*** DONE ***)
+    enum llama_attention_type   attention_type;     // attention type to use for embeddings (*** DONE ***)
     float                       rope_freq_base;     // RoPE base frequency, 0 = from model
     float                       rope_freq_scale;    // RoPE frequency scaling factor, 0 = from model
     float                       yarn_ext_factor;    // YaRN extrapolation mix factor, negative = from model
@@ -102,6 +104,7 @@ typedef struct {
     bool                        generate_embedding; // if true, extract embeddings (together with logits)
     bool                        normalize_embedding;// if true, embeddings are normalized
     bool                        json_output;        // if true, embedding result is converted to JSON
+    
     
     // ** CUSTOM **
     int32_t                     max_tokens;         // to control max allowed tokens to generate (to control user's input size)
@@ -131,9 +134,6 @@ typedef struct {
     
     // whisper
     struct whisper_context      *whisper;
-    
-    // embedding
-    llama_seq_id                sequence_id;        // some models requires to be unique across multiple calls to llm_embed_generate
     
     // chat
     struct {
@@ -208,12 +208,20 @@ void llm_set_context_options (struct llama_context_params *llama_context, llm_op
     if (options->generate_embedding) {
         // https://github.com/ggml-org/llama.cpp/discussions/15093
         llama_context->embeddings = true;
-        llama_context->pooling_type = LLAMA_POOLING_TYPE_LAST;
+        llama_context->pooling_type = LLAMA_POOLING_TYPE_MEAN;
     }
     
     if (options->context_size) {
         llama_context->n_ctx = options->context_size;
         llama_context->n_batch = options->context_size;
+    }
+    
+    if (options->pooling_type != LLAMA_POOLING_TYPE_UNSPECIFIED) {
+        llama_context->pooling_type = options->pooling_type;
+    }
+    
+    if (options->attention_type != LLAMA_ATTENTION_TYPE_UNSPECIFIED) {
+        llama_context->attention_type = options->attention_type;
     }
 }
 
@@ -223,6 +231,8 @@ static void llm_options_init (llm_options *options) {
     options->normalize_embedding = true;
     options->max_tokens = 0;    // no limits
     options->log_info = false;  // disable INFO messages logging
+    options->pooling_type = LLAMA_POOLING_TYPE_UNSPECIFIED;
+    options->attention_type = LLAMA_ATTENTION_TYPE_UNSPECIFIED;
 }
 
 static bool llm_options_callback (void *xdata, const char *key, int key_len, const char *value, int value_len) {
@@ -250,6 +260,19 @@ static bool llm_options_callback (void *xdata, const char *key, int key_len, con
         int value = (int)strtol(buffer, NULL, 0);
         options->normalize_embedding = (value != 0);
         return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_POOLING_TYPE, key_len) == 0) {
+        if (strcasecmp(buffer, "none") == 0) options->pooling_type = LLAMA_POOLING_TYPE_NONE;
+        else if (strcasecmp(buffer, "mean") == 0) options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
+        else if (strcasecmp(buffer, "cls") == 0) options->pooling_type = LLAMA_POOLING_TYPE_CLS;
+        else if (strcasecmp(buffer, "last") == 0) options->pooling_type = LLAMA_POOLING_TYPE_LAST;
+        else if (strcasecmp(buffer, "rank") == 0) options->pooling_type = LLAMA_POOLING_TYPE_RANK;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_ATTENTION_TYPE, key_len) == 0) {
+        if (strcasecmp(buffer, "causal") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_CAUSAL;
+        else if (strcasecmp(buffer, "non_causal") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_NON_CAUSAL;
     }
     
     if (strncasecmp(key, OPTION_KEY_MAX_TOKENS, key_len) == 0) {
@@ -590,34 +613,46 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         return;
     }
     
+    llama_seq_id sequence_id = 0;
+    llama_memory_t memory = llama_get_memory(ctx);
+    
+    // before encoding (defensive if anything lingered)
+    if (memory) llama_memory_seq_rm(memory, sequence_id, 0, -1);
+    
     // set up batch for processing
+    const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
     llama_batch batch = llama_batch_init(n_tokens, 0, 1);
-    llama_seq_id sequence_id = ai->sequence_id;
     for (int i = 0; i < n_tokens; ++i) {
         batch.token[batch.n_tokens] = tokens[i];
         batch.pos[batch.n_tokens] = i;
         batch.n_seq_id[batch.n_tokens] = 1;
         batch.seq_id[batch.n_tokens][0] = sequence_id;
-        batch.logits[batch.n_tokens]  = i == (n_tokens - 1);
+        batch.logits[batch.n_tokens]  = (pooling_type == LLAMA_POOLING_TYPE_NONE) ? 1 : 0; // see comment below
         batch.n_tokens++;
     }
-    ai->sequence_id++;
+
+    // This optimization is valid when pooling is enabled (MEAN / CLS / LAST).
+    // You only need one “marked” token per sequence to read the sequence-level embedding.
+    // If pooling_type == NONE and you want token-level embeddings, you must set logits=1 for every token you intend to read.
+    
+    // last token of this sequence requests outputs
+    batch.logits[batch.n_tokens - 1] = 1;
     
     // run model (do real processing)
-    llama_memory_t memory = llama_get_memory(ctx);
+    // from ggerganov: If your application is going to support both models with and without a memory, then you should simply call llama_decode() always
+    // https://github.com/ggml-org/llama.cpp/discussions/14454
     int32_t rc = (memory) ? llama_decode(ctx, batch) : llama_encode(ctx, batch);
      
     if (rc < 0) {
         sqlite3_free(tokens);
         sqlite3_free(embedding);
         llama_batch_free(batch);
-        sqlite_context_result_error(context, SQLITE_ERROR, "Model decode failed during embedding generation (%d)", rc);
+        sqlite_context_result_error(context, SQLITE_ERROR, "Model %s failed during embedding generation (%d)", rc, (memory) ? "decode" : "encode");
         return;
     }
     
-    // retrieve embeddings (context set to LLAMA_POOLING_TYPE_LAST in llama_init_from_model)
+    // retrieve embeddings (context set to LLAMA_POOLING_TYPE_MEAN in llama_init_from_model)
     const float *result = NULL;
-    const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
     if (pooling_type == LLAMA_POOLING_TYPE_NONE) result = llama_get_embeddings(ctx);
     else result = llama_get_embeddings_seq(ctx, sequence_id);
     
@@ -632,9 +667,11 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     // check if normalization is needed (default true)
     (ai->options.normalize_embedding) ? llm_embed_normalize(result, embedding, dimension) : memcpy(embedding, result, sizeof(float) * dimension);
     
+    // IMPORTANT: clear memory for this sequence so the next call starts clean
     if (memory) {
-        llama_memory_clear(memory, true);
+        // remove tokens in this sequence and optionally compact
         llama_memory_seq_rm(memory, sequence_id, 0, -1);
+        llama_memory_clear(memory, true);
     }
     
     // check if JSON output is set
