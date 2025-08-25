@@ -13,6 +13,8 @@ on:
 jobs:
   build-and-publish:
     runs-on: ${{ matrix.os }}
+    permissions:
+      id-token: write  # mandatory for Pypi trusted publishing
     strategy:
       matrix:
         include:
@@ -58,7 +60,7 @@ jobs:
         run: |
           cd python-package
           python3 -m pip install --upgrade pip
-          pip install .[dev]
+          python3 -m pip install -r requirements-dev.txt
 
       - name: Get version
         id: get_version
@@ -73,6 +75,7 @@ jobs:
 
       - name: Download artifacts for current platform
         run: |
+          cd python-package
           python3 download_artifacts.py "${{ matrix.plat_name }}" "${{ steps.get_version.outputs.version }}"
 
       - name: Build wheel
@@ -80,10 +83,11 @@ jobs:
           PACKAGE_VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           cd python-package
-          python setup.py clean --all bdist_wheel --plat-name "${{ matrix.plat_name }}"
+          python setup.py bdist_wheel --plat-name "${{ matrix.plat_name }}"
 
       - name: Publish to PyPI
-        if: github.event_name == 'release'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: python-package/dist
+          repository-url: https://test.pypi.org/legacy/
+          verbose: true
