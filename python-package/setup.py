@@ -21,7 +21,7 @@ version = os.environ.get("PACKAGE_VERSION", "")
 if not version:
     print("PACKAGE_VERSION environment variable is not set.")
     print(usage)
-    exit(1)
+    sys.exit(1)
 
 # Get Python platform name from --plat-name argument
 plat_name = None
@@ -37,8 +37,8 @@ if not plat_name:
 
 # Map plat_name to classifier
 classifier_map = {
-    "linux_x86_64": "Operating System :: POSIX :: Linux",
-    "linux_aarch64": "Operating System :: POSIX :: Linux",
+    "manylinux2014_x86_64": "Operating System :: POSIX :: Linux",
+    "manylinux2014_aarch64": "Operating System :: POSIX :: Linux",
     "win_amd64": "Operating System :: Microsoft :: Windows",
     "macosx_10_9_x86_64": "Operating System :: MacOS",
     "macosx_11_0_arm64": "Operating System :: MacOS",

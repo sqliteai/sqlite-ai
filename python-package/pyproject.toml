@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sqlite-ai"
 dynamic = ["version"]
-description = "Python bindings and prebuilt binaries for SQLite AI extension."
+description = "Python prebuilt binaries for SQLite AI extension for all supported platforms and architectures."
 authors = [
     { name = "SQLite AI Team" }
 ]

@@ -14,6 +14,9 @@ This package provides the sqlite-ai extension prebuilt binaries for multiple pla
 
 ## Usage
 
+> **Note:** Some SQLite installations on certain operating systems may have extension loading disabled by default.   
+If you encounter issues loading the extension, refer to the [sqlite-extensions-guide](https://github.com/sqliteai/sqlite-extensions-guide/) for platform-specific instructions on enabling and using SQLite extensions.
+
 ```python
 import importlib.resources
 import sqlite3
@@ -32,4 +35,5 @@ conn.enable_load_extension(False)
 
 
 # Now you can use sqlite-ai features in your SQL queries
+print(conn.execute("SELECT ai_version();").fetchone())
 ```

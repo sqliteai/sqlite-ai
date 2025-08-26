@@ -14,8 +14,8 @@ RELEASE_URL = f"https://github.com/{REPO}/releases/download"
 
 # Map Python plat_name to artifact names
 ARTIFACTS = {
-    "linux_x86_64": ["ai-linux-cpu-x86_64", "ai-linux-gpu-x86_64"],
-    "linux_aarch64": [
+    "manylinux2014_x86_64": ["ai-linux-cpu-x86_64", "ai-linux-gpu-x86_64"],
+    "manylinux2014_aarch64": [
         "ai-linux-cpu-arm64",
         "ai-linux-gpu-arm64",
     ],
@@ -25,8 +25,8 @@ ARTIFACTS = {
 }
 
 BINARY_NAME = {
-    "linux_x86_64": "ai.so",
-    "linux_aarch64": "ai.so",
+    "manylinux2014_x86_64": "ai.so",
+    "manylinux2014_aarch64": "ai.so",
     "win_amd64": "ai.dll",
     "macosx_10_9_x86_64": "ai.dylib",
     "macosx_11_0_arm64": "ai.dylib",
@@ -71,7 +71,7 @@ def download_and_extract(artifact_name, bin_name, version):
 def main():
     version = None
     platform = None
-    if len(sys.argv) > 2:
+    if len(sys.argv) == 3:
         platform = sys.argv[1].lower()
         version = sys.argv[2]
 
