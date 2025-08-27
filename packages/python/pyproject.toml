@@ -11,7 +11,12 @@ authors = [
 ]
 readme = "README.md"
 requires-python = ">=3"
-classifiers = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS :: MacOS X"
+]
 
 [project.urls]
 Homepage = "https://sqlite.ai"

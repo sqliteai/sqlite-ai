@@ -64,9 +64,5 @@ setuptools.setup(
     package_dir={"": "src"},
     include_package_data=True,
     python_requires=project.get("requires-python", ">=3"),
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
-        classifier
-    ],
+    classifiers=project.get("classifiers", []),
 )
