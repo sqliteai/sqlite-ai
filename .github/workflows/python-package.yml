@@ -58,7 +58,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          cd python-package
+          cd packages/python
           python3 -m pip install --upgrade pip
           python3 -m pip install -r requirements-dev.txt
 
@@ -75,20 +75,20 @@ jobs:
 
       - name: Download artifacts for current platform
         run: |
-          cd python-package
+          cd packages/python
           python3 download_artifacts.py "${{ matrix.plat_name }}" "${{ steps.get_version.outputs.version }}"
 
       - name: Build wheel
         env:
           PACKAGE_VERSION: ${{ steps.get_version.outputs.version }}
         run: |
-          cd python-package
+          cd packages/python
           python setup.py bdist_wheel --plat-name "${{ matrix.plat_name }}"
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: python-package/dist
+          packages-dir: packages/python/dist
           verbose: true
           # Avoid workflow to fail if the version has already been published
           skip-existing: true

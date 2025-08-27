@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "toml"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sqlite-ai"
+dynamic = ["version"]
+description = "Python prebuilt binaries for SQLite AI extension for all supported platforms and architectures."
+authors = [
+    { name = "SQLite AI Team" }
+]
+readme = "README.md"
+requires-python = ">=3"
+classifiers = []
+
+[project.urls]
+Homepage = "https://sqlite.ai"
+Documentation = "https://github.com/sqliteai/sqlite-ai/blob/main/API.md"
+Repository = "https://github.com/sqliteai/sqlite-ai"
+Issues = "https://github.com/sqliteai/sqlite-ai/issues"
