@@ -40,6 +40,17 @@ Download the appropriate pre-built binary for your platform from the official [R
 SELECT load_extension('./ai');
 ```
 
+### Python Package
+
+Python developers can quickly get started using the ready-to-use `sqlite-ai` package available on PyPI:
+
+```bash
+pip install sqlite-ai
+```
+
+For usage details and examples, see the [Python package documentation](./packages/python/README.md).
+
+
 ## Getting Started
 
 Here's a quick example to get started with SQLite Sync:

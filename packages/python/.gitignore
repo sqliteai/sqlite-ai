@@ -1,0 +1,23 @@
+# Build directories
+build/
+dist/
+*.egg-info/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Package files
+*.whl
+*.tar.gz
+
+# Temporary files
+*.tmp
+*.log

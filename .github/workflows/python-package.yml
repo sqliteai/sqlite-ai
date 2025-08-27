@@ -13,6 +13,8 @@ on:
 jobs:
   build-and-publish:
     runs-on: ${{ matrix.os }}
+    permissions:
+      id-token: write  # mandatory for Pypi trusted publishing
     strategy:
       matrix:
         include:
@@ -20,23 +22,23 @@ jobs:
             platform: linux
             python-version: "3.10"
             arch: x86_64
-            plat_name: linux_x86_64
+            plat_name: manylinux2014_x86_64
           - os: ubuntu-latest
             platform: linux
             python-version: "3.10"
             arch: arm64
-            plat_name: linux_aarch64
-          - os: windows-latest
+            plat_name: manylinux2014_aarch64
+          - os: ubuntu-latest
             platform: windows
             python-version: "3.10"
             arch: x86_64
             plat_name: win_amd64
-          - os: macos-latest
+          - os: ubuntu-latest
             platform: macos
             python-version: "3.10"
             arch: x86_64
             plat_name: macosx_10_9_x86_64
-          - os: macos-latest
+          - os: ubuntu-latest
             platform: macos
             python-version: "3.10"
             arch: arm64
@@ -56,9 +58,9 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          cd python-package
+          cd packages/python
           python3 -m pip install --upgrade pip
-          pip install .[dev]
+          python3 -m pip install -r requirements-dev.txt
 
       - name: Get version
         id: get_version
@@ -73,17 +75,22 @@ jobs:
 
       - name: Download artifacts for current platform
         run: |
+          cd packages/python
           python3 download_artifacts.py "${{ matrix.plat_name }}" "${{ steps.get_version.outputs.version }}"
 
       - name: Build wheel
         env:
           PACKAGE_VERSION: ${{ steps.get_version.outputs.version }}
         run: |
-          cd python-package
-          python setup.py clean --all bdist_wheel --plat-name "${{ matrix.plat_name }}"
+          cd packages/python
+          python setup.py bdist_wheel --plat-name "${{ matrix.plat_name }}"
 
       - name: Publish to PyPI
-        if: github.event_name == 'release'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: python-package/dist
+          packages-dir: packages/python/dist
+          verbose: true
+          # Avoid workflow to fail if the version has already been published
+          skip-existing: true
+          # Upload to Test Pypi for testing
+          # repository-url: https://test.pypi.org/legacy/
