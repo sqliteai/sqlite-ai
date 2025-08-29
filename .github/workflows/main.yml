@@ -86,6 +86,10 @@ jobs:
 
     steps:
 
+      - name: linux-musl x86_64 install dependencies
+        if: matrix.name == 'linux-musl' && matrix.arch == 'x86_64'
+        run: apk update && apk add --no-cache git gcc make sqlite musl-dev linux-headers
+
       - uses: actions/checkout@v4.2.2
         with:
           submodules: true
@@ -141,10 +145,6 @@ jobs:
       - name: macos install dependencies
         if: matrix.name == 'macos'
         run: brew link sqlite --force
-
-      - name: linux-musl x86_64 install dependencies
-        if: matrix.name == 'linux-musl' && matrix.arch == 'x86_64'
-        run: apk update && apk add --no-cache gcc make sqlite musl-dev linux-headers
 
       - name: linux-musl arm64 setup container
         if: matrix.name == 'linux-musl' && matrix.arch == 'arm64'
