@@ -205,9 +205,9 @@ test: $(TARGET)
 
 # Build submodules
 ifeq ($(PLATFORM),windows)
-	ARGS = --parallel $(CPUS)
+    ARGS = --parallel $(CPUS)
 else
-	ARGS = -- -j$(CPUS)
+    ARGS = -- -j$(CPUS)
 endif
 build/llama.cpp.stamp:
 	cmake -B $(BUILD_LLAMA) $(LLAMA_OPTIONS) $(LLAMA_DIR)
