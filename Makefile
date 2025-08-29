@@ -79,23 +79,17 @@ else ifeq ($(PLATFORM),macos)
 	MINIAUDIO_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),android)
-	# Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
-	ifeq ($(filter %,$(ARCH)),)
+	ifndef ARCH # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
 		$(error "Android ARCH must be set to ARCH=x86_64 or ARCH=arm64-v8a")
 	endif
-	# Set ANDROID_NDK path to find android build tools
-	# e.g. on MacOS: export ANDROID_NDK=/Users/username/Library/Android/sdk/ndk/25.2.9519653
-	ifeq ($(filter %,$(ANDROID_NDK)),)
+	ifndef ANDROID_NDK # Set ANDROID_NDK path to find android build tools; e.g. on MacOS: export ANDROID_NDK=/Users/username/Library/Android/sdk/ndk/25.2.9519653
 		$(error "Android NDK must be set")
 	endif
-
 	BIN = $(ANDROID_NDK)/toolchains/llvm/prebuilt/$(HOST)-x86_64/bin
 	PATH := $(BIN):$(PATH)
-
 	ifneq (,$(filter $(ARCH),arm64 arm64-v8a))
 		override ARCH := aarch64
 	endif
-
 	CC = $(BIN)/$(ARCH)-linux-android26-clang
 	CXX = $(CC)++
 	TARGET := $(DIST_DIR)/ai.so
@@ -116,7 +110,7 @@ else ifeq ($(PLATFORM),ios)
 	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DWHISPER_COREML=ON
 	MINIAUDIO_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_C_FLAGS="-x objective-c"
 	STRIP = strip -x -S $@
-else ifeq ($(PLATFORM),isim)
+else ifeq ($(PLATFORM),ios-sim)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=14.0
 	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
@@ -182,7 +176,7 @@ $(DEF_FILE):
 ifeq ($(PLATFORM),windows)
 	@echo "LIBRARY ai.dll" > $@
 	@echo "EXPORTS" >> $@
-	@echo "	sqlite3_ai_init" >> $@
+	@echo "    sqlite3_ai_init" >> $@
 endif
 
 # Make sure the build and dist directories exist
@@ -211,9 +205,9 @@ test: $(TARGET)
 
 # Build submodules
 ifeq ($(PLATFORM),windows)
-    ARGS = --parallel $(CPUS)
+	ARGS = --parallel $(CPUS)
 else
-    ARGS = -- -j$(CPUS)
+	ARGS = -- -j$(CPUS)
 endif
 build/llama.cpp.stamp:
 	cmake -B $(BUILD_LLAMA) $(LLAMA_OPTIONS) $(LLAMA_DIR)
@@ -243,6 +237,67 @@ version:
 clean:
 	rm -rf $(BUILD_DIR)/* $(DIST_DIR)/* *.gcda *.gcno *.gcov *.sqlite
 
+.NOTPARALLEL: %.dylib
+%.dylib:
+	rm -rf $(BUILD_DIR) && $(MAKE) PLATFORM=$*
+	mv $(DIST_DIR)/ai.dylib $(DIST_DIR)/$@
+
+define PLIST
+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\
+<plist version=\"1.0\">\
+<dict>\
+<key>CFBundleDevelopmentRegion</key>\
+<string>en</string>\
+<key>CFBundleExecutable</key>\
+<string>ai</string>\
+<key>CFBundleIdentifier</key>\
+<string>ai.sqlite.ai</string>\
+<key>CFBundleInfoDictionaryVersion</key>\
+<string>6.0</string>\
+<key>CFBundlePackageType</key>\
+<string>FMWK</string>\
+<key>CFBundleSignature</key>\
+<string>????</string>\
+<key>CFBundleVersion</key>\
+<string>$(shell make version)</string>\
+<key>CFBundleShortVersionString</key>\
+<string>$(shell make version)</string>\
+<key>MinimumOSVersion</key>\
+<string>11.0</string>\
+</dict>\
+</plist>
+endef
+
+define MODULEMAP
+framework module ai {\
+  umbrella header \"sqlite-ai.h\"\
+  export *\
+}
+endef
+
+LIB_NAMES = ios.dylib ios-sim.dylib macos.dylib
+FMWK_NAMES = ios-arm64 ios-arm64_x86_64-simulator macos-arm64_x86_64
+$(DIST_DIR)/%.xcframework: $(LIB_NAMES)
+	@$(foreach i,1 2 3,\
+		lib=$(word $(i),$(LIB_NAMES)); \
+		fmwk=$(word $(i),$(FMWK_NAMES)); \
+		mkdir -p $(DIST_DIR)/$$fmwk/ai.framework/Headers; \
+		mkdir -p $(DIST_DIR)/$$fmwk/ai.framework/Modules; \
+		cp src/sqlite-ai.h $(DIST_DIR)/$$fmwk/ai.framework/Headers; \
+		printf "$(PLIST)" > $(DIST_DIR)/$$fmwk/ai.framework/Info.plist; \
+		printf "$(MODULEMAP)" > $(DIST_DIR)/$$fmwk/ai.framework/Modules/module.modulemap; \
+		mv $(DIST_DIR)/$$lib $(DIST_DIR)/$$fmwk/ai.framework/ai; \
+		install_name_tool -id "@rpath/ai.framework/ai" $(DIST_DIR)/$$fmwk/ai.framework/ai; \
+	)
+	xcodebuild -create-xcframework $(foreach fmwk,$(FMWK_NAMES),-framework $(DIST_DIR)/$(fmwk)/ai.framework) -output $@
+	rm -rf $(foreach fmwk,$(FMWK_NAMES),$(DIST_DIR)/$(fmwk))
+
+xcframework: $(DIST_DIR)/ai.xcframework
+
+version:
+	@echo $(shell sed -n 's/^#define SQLITE_AI_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' src/sqlite-ai.h)
+
 # Help message
 help:
 	@echo "SQLite AI Extension Makefile"
@@ -255,12 +310,13 @@ help:
 	@echo "  windows (default on Windows)"
 	@echo "  android (needs ARCH to be set to x86_64 or arm64-v8a and ANDROID_NDK to be set)"
 	@echo "  ios (only on macOS)"
-	@echo "  isim (only on macOS)"
+	@echo "  ios-sim (only on macOS)"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all					- Build the extension (default)"
-	@echo "  clean					- Remove built files"
-	@echo "  test					- Test the extension"
-	@echo "  help					- Display this help message"
+	@echo "  all			- Build the extension (default)"
+	@echo "  clean			- Remove built files"
+	@echo "  test			- Test the extension"
+	@echo "  help			- Display this help message"
+	@echo "  xcframework	- Build the Apple XCFramework"
 
-.PHONY: all clean test extension help
+.PHONY: all clean test extension help version xcframework

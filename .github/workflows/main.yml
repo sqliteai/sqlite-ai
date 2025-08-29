@@ -9,13 +9,14 @@ permissions:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
-    name: ${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }} build${{ matrix.arch != 'arm64-v8a' && matrix.name != 'isim' && matrix.name != 'ios' && ' + test' || ''}}
+    container: ${{ matrix.container && matrix.container || '' }}
+    name: ${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }} build${{ matrix.arch != 'arm64-v8a' && matrix.name != 'ios-sim' && matrix.name != 'ios' && matrix.name != 'apple-xcframework' && ' + test' || ''}}
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - os: macos-15
             name: macos
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           - os: ubuntu-22.04
@@ -26,13 +27,31 @@ jobs:
             arch: x86_64
             name: linux-gpu
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
-          - os: LinuxARM64
+          - os: ubuntu-22.04-arm
             arch: arm64
             name: linux-cpu
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_CPU_ARM_ARCH=armv8.2-a"
-          - os: LinuxARM64
+          - os: ubuntu-22.04-arm
             arch: arm64
             name: linux-gpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
+          - os: ubuntu-22.04
+            arch: x86_64
+            name: linux-musl-cpu
+            container: alpine:latest
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_AVX2=ON"
+          - os: ubuntu-22.04
+            arch: x86_64
+            name: linux-musl-gpu
+            container: alpine:latest
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
+          - os: ubuntu-22.04-arm
+            arch: arm64
+            name: linux-musl-cpu
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_CPU_ARM_ARCH=armv8.2-a"
+          - os: ubuntu-22.04-arm
+            arch: arm64
+            name: linux-musl-gpu
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
           - os: windows-2022
             arch: x86_64
@@ -42,25 +61,28 @@ jobs:
             arch: x86_64
             name: windows-gpu
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             arch: x86_64
             name: android
             make: PLATFORM=android ARCH=x86_64
             sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             arch: arm64-v8a
             name: android
             make: PLATFORM=android ARCH=arm64-v8a LLAMA="-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod"
-          - os: macos-latest
+          - os: macos-15
             name: ios
             make: PLATFORM=ios LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
-          - os: macos-latest
-            name: isim
-            make: PLATFORM=isim LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+          - os: macos-15
+            name: ios-sim
+            make: PLATFORM=ios-sim LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+          - os: macos-15
+            name: apple-xcframework
+            make: xcframework LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
 
     defaults:
       run:
-        shell: bash
+        shell: ${{ matrix.container && 'sh' || 'bash' }}
 
     steps:
 
@@ -116,6 +138,25 @@ jobs:
             ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-opencl-headers' || '' }} 
             ${{ matrix.name == 'windows-gpu' && 'mingw-w64-x86_64-opencl-icd' || '' }} 
           
+      - name: macos install dependencies
+        if: matrix.name == 'macos'
+        run: brew link sqlite --force
+
+      - name: linux-musl x86_64 install dependencies
+        if: matrix.name == 'linux-musl' && matrix.arch == 'x86_64'
+        run: apk update && apk add --no-cache gcc make sqlite musl-dev linux-headers
+
+      - name: linux-musl arm64 setup container
+        if: matrix.name == 'linux-musl' && matrix.arch == 'arm64'
+        run: |
+          docker run -d --name alpine \
+            --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            alpine:latest \
+            tail -f /dev/null
+          docker exec alpine sh -c "apk update && apk add --no-cache gcc make sqlite musl-dev linux-headers"
+
       - name: linux install opencl
         if: matrix.name == 'linux-gpu'
         run: sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
@@ -190,7 +231,7 @@ jobs:
 
       - name: unix build llama.cpp
         if: matrix.os != 'windows-2022' && steps.cache-llama.outputs.cache-hit != 'true'
-        run: make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+        run: ${{ matrix.name == 'linux-musl' && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build whisper.cpp 
         if: matrix.os == 'windows-2022' && steps.cache-whisper.outputs.cache-hit != 'true'
@@ -201,7 +242,7 @@ jobs:
 
       - name: unix build whisper.cpp
         if: matrix.os != 'windows-2022' && steps.cache-whisper.outputs.cache-hit != 'true'
-        run: make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+        run: ${{ matrix.name == 'linux-musl' && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build miniaudio 
         if: matrix.os == 'windows-2022' && steps.cache-miniaudio.outputs.cache-hit != 'true'
@@ -210,7 +251,7 @@ jobs:
 
       - name: unix build miniaudio
         if: matrix.os != 'windows-2022' && steps.cache-miniaudio.outputs.cache-hit != 'true'
-        run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
+        run: ${{ matrix.name == 'linux-musl' && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai
         if: matrix.os == 'windows-2022'
@@ -221,11 +262,36 @@ jobs:
 
       - name: unix build sqlite-ai
         if: matrix.os != 'windows-2022'
-        run: make extension ${{ matrix.make && matrix.make || ''}}
+        run: ${{ matrix.name == 'linux-musl' && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make extension ${{ matrix.make && matrix.make || ''}}
 
-      - name: macos install sqlite3 without SQLITE_OMIT_LOAD_EXTENSION
-        if: matrix.name == 'macos'
-        run: brew link sqlite --force
+      - name: create keychain for codesign
+        if: matrix.os == 'macos-15'
+        run: |
+          echo "${{ secrets.APPLE_CERTIFICATE }}" | base64 --decode > certificate.p12
+          security create-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+          security import certificate.p12 -k build.keychain -P "${{ secrets.CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+
+      - name: codesign dylib
+        if: matrix.os == 'macos-15' && matrix.name != 'apple-xcframework'
+        run: codesign --sign "${{ secrets.APPLE_TEAM_ID }}" --timestamp --options runtime dist/ai.dylib
+
+      - name: codesign and notarize xcframework
+        if: matrix.name == 'apple-xcframework'
+        run: |
+          find dist/ai.xcframework -name "*.framework" -exec echo "Signing: {}" \; -exec codesign --sign "${{ secrets.APPLE_TEAM_ID }}" --timestamp --options runtime {} \; # Sign each individual framework FIRST
+          codesign --sign "${{ secrets.APPLE_TEAM_ID }}" --timestamp --options runtime dist/ai.xcframework # Then sign the xcframework wrapper
+          ditto -c -k --keepParent dist/ai.xcframework dist/ai.xcframework.zip
+          xcrun notarytool submit dist/ai.xcframework.zip --apple-id "${{ secrets.APPLE_ID }}" --password "${{ secrets.APPLE_PASSWORD }}" --team-id "${{ secrets.APPLE_TEAM_ID }}" --wait
+          rm dist/ai.xcframework.zip
+
+      - name: cleanup keychain for codesign
+        if: matrix.os == 'macos-15'
+        run: |
+          rm certificate.p12
+          security delete-keychain build.keychain
 
       - name: android setup test environment
         if: matrix.name == 'android' && matrix.arch != 'arm64-v8a'
@@ -280,7 +346,7 @@ jobs:
 
       - name: unix test sqlite-ai
         if: contains(matrix.name, 'linux') || matrix.name == 'macos'
-        run: make test ${{ matrix.make && matrix.make || ''}}
+        run: ${{ matrix.name == 'linux-musl' && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make test ${{ matrix.make && matrix.make || ''}}
 
       - uses: actions/upload-artifact@v4.6.2
         if: always()
@@ -290,7 +356,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     name: release
     needs: build
     if: github.ref == 'refs/heads/main'
@@ -324,9 +390,10 @@ jobs:
           for folder in "artifacts"/*; do
             if [ -d "$folder" ]; then
               name=$(basename "$folder")
-              zip -jq "${name}-${{ steps.tag.outputs.version }}.zip" "$folder"/*
-              tar -cJf "${name}-${{ steps.tag.outputs.version }}.tar.xz" -C "$folder" .
-              tar -czf "${name}-${{ steps.tag.outputs.version }}.tar.gz" -C "$folder" .
+              if [[ "$name" != "ai-apple-xcframework" ]]; then
+                tar -czf "${name}-${{ steps.tag.outputs.version }}.tar.gz" -C "$folder" .
+              fi
+              (cd "$folder" && zip -rq "../../${name}-${{ steps.tag.outputs.version }}.zip" .)
             fi
           done
 
@@ -337,6 +404,5 @@ jobs:
           tag_name: ${{ steps.tag.outputs.version }}
           files: |
             ai-*-${{ steps.tag.outputs.version }}.zip
-            ai-*-${{ steps.tag.outputs.version }}.tar.xz
             ai-*-${{ steps.tag.outputs.version }}.tar.gz
           make_latest: true
