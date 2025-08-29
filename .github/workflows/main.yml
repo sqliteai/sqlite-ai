@@ -87,7 +87,7 @@ jobs:
     steps:
 
       - name: linux-musl x86_64 install dependencies
-        if: matrix.name == 'linux-musl' && matrix.arch == 'x86_64'
+        if: contains(matrix.name, 'linux-musl') && matrix.arch == 'x86_64'
         run: apk update && apk add --no-cache git gcc make sqlite musl-dev linux-headers
 
       - uses: actions/checkout@v4.2.2
@@ -147,7 +147,7 @@ jobs:
         run: brew link sqlite --force
 
       - name: linux-musl arm64 setup container
-        if: matrix.name == 'linux-musl' && matrix.arch == 'arm64'
+        if: contains(matrix.name, 'linux-musl') && matrix.arch == 'arm64'
         run: |
           docker run -d --name alpine \
             --platform linux/arm64 \
@@ -231,7 +231,7 @@ jobs:
 
       - name: unix build llama.cpp
         if: matrix.os != 'windows-2022' && steps.cache-llama.outputs.cache-hit != 'true'
-        run: ${{ matrix.name == 'linux-musl' && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+        run: ${{ contains(matrix.name, 'linux-musl') && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build whisper.cpp 
         if: matrix.os == 'windows-2022' && steps.cache-whisper.outputs.cache-hit != 'true'
@@ -242,7 +242,7 @@ jobs:
 
       - name: unix build whisper.cpp
         if: matrix.os != 'windows-2022' && steps.cache-whisper.outputs.cache-hit != 'true'
-        run: ${{ matrix.name == 'linux-musl' && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
+        run: ${{ contains(matrix.name, 'linux-musl') && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build miniaudio 
         if: matrix.os == 'windows-2022' && steps.cache-miniaudio.outputs.cache-hit != 'true'
@@ -251,7 +251,7 @@ jobs:
 
       - name: unix build miniaudio
         if: matrix.os != 'windows-2022' && steps.cache-miniaudio.outputs.cache-hit != 'true'
-        run: ${{ matrix.name == 'linux-musl' && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
+        run: ${{ contains(matrix.name, 'linux-musl') && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai
         if: matrix.os == 'windows-2022'
@@ -262,7 +262,7 @@ jobs:
 
       - name: unix build sqlite-ai
         if: matrix.os != 'windows-2022'
-        run: ${{ matrix.name == 'linux-musl' && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make extension ${{ matrix.make && matrix.make || ''}}
+        run: ${{ contains(matrix.name, 'linux-musl') && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make extension ${{ matrix.make && matrix.make || ''}}
 
       - name: create keychain for codesign
         if: matrix.os == 'macos-15'
@@ -346,7 +346,7 @@ jobs:
 
       - name: unix test sqlite-ai
         if: contains(matrix.name, 'linux') || matrix.name == 'macos'
-        run: ${{ matrix.name == 'linux-musl' && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make test ${{ matrix.make && matrix.make || ''}}
+        run: ${{ contains(matrix.name, 'linux-musl') && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make test ${{ matrix.make && matrix.make || ''}}
 
       - uses: actions/upload-artifact@v4.6.2
         if: always()
