@@ -295,9 +295,6 @@ $(DIST_DIR)/%.xcframework: $(LIB_NAMES)
 
 xcframework: $(DIST_DIR)/ai.xcframework
 
-version:
-	@echo $(shell sed -n 's/^#define SQLITE_AI_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' src/sqlite-ai.h)
-
 # Help message
 help:
 	@echo "SQLite AI Extension Makefile"
