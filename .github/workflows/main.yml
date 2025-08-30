@@ -161,6 +161,10 @@ jobs:
         if: matrix.name == 'linux-gpu'
         run: sudo apt-get install -y opencl-headers ocl-icd-opencl-dev
 
+      - name: linux-musl install opencl
+        if: matrix.name == 'linux-musl-gpu'
+        run: ${{ matrix.arch == 'arm64' && 'docker exec alpine' || '' }} apk add --no-cache opencl-headers opencl-icd-loader-dev
+
       - name: linux-x86_64 install vulkan
         if: matrix.name == 'linux-gpu' && matrix.arch == 'x86_64'
         run: |
@@ -193,6 +197,10 @@ jobs:
 
           sudo apt-get update || true    ;# Prevent failure due to missing URLs.
           sudo apt-get install -y --no-install-recommends build-essential glslc crossbuild-essential-arm64 libvulkan-dev:arm64
+
+      - name: linux-musl install vulkan
+        if: matrix.name == 'linux-musl-gpu'
+        run: ${{ matrix.arch == 'arm64' && 'docker exec alpine' || '' }} apk add --no-cache vulkan-headers vulkan-loader-dev glslc
 
       - name: cache llama.cpp build
         id: cache-llama
