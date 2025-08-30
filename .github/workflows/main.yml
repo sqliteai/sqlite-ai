@@ -44,7 +44,7 @@ jobs:
             arch: x86_64
             name: linux-musl-gpu
             container: alpine:latest
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=OFF -DGGML_OPENCL=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_OPENCL=ON"
           - os: ubuntu-22.04-arm
             arch: arm64
             name: linux-musl-cpu
@@ -52,7 +52,7 @@ jobs:
           - os: ubuntu-22.04-arm
             arch: arm64
             name: linux-musl-gpu
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=OFF -DGGML_OPENCL=ON"
+            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_OPENCL=ON"
           - os: windows-2022
             arch: x86_64
             name: windows-cpu
