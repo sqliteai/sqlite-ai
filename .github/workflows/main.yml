@@ -201,7 +201,7 @@ jobs:
       - name: linux-musl install vulkan
         if: matrix.name == 'linux-musl-gpu'
         run: |
-          ${{ matrix.arch == 'arm64' && 'docker exec alpine' || '' }} apk add --no-cache build-base mesa-vulkan-drivers vulkan-loader-dev vulkan-headers shaderc wget
+          ${{ matrix.arch == 'arm64' && 'docker exec alpine' || '' }} apk add --no-cache build-base vulkan-loader-dev vulkan-headers shaderc wget
           
           wget https://sdk.lunarg.com/sdk/download/latest/linux/vulkan-sdk.tar.xz -O vulkan-sdk.tar.xz
           tar -xf vulkan-sdk.tar.xz
