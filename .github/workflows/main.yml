@@ -200,7 +200,17 @@ jobs:
 
       - name: linux-musl install vulkan
         if: matrix.name == 'linux-musl-gpu'
-        run: ${{ matrix.arch == 'arm64' && 'docker exec alpine' || '' }} apk add --no-cache build-base vulkan-loader-dev vulkan-headers shaderc 
+        run: |
+          ${{ matrix.arch == 'arm64' && 'docker exec alpine' || '' }} apk add --no-cache build-base mesa-vulkan-drivers vulkan-loader-dev vulkan-headers shaderc wget
+          
+          wget https://sdk.lunarg.com/sdk/download/latest/linux/vulkan-sdk.tar.xz -O vulkan-sdk.tar.xz
+          tar -xf vulkan-sdk.tar.xz
+          cd $(ls -d 1.* | head -n1)
+          source setup-env.sh
+          echo "VULKAN_SDK=$VULKAN_SDK" >> $GITHUB_ENV
+          echo "PATH=$PATH" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "VK_ADD_LAYER_PATH=$VK_ADD_LAYER_PATH" >> $GITHUB_ENV
 
       - name: cache llama.cpp build
         id: cache-llama
