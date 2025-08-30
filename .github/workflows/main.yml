@@ -88,7 +88,7 @@ jobs:
 
       - name: linux-musl x86_64 install dependencies
         if: contains(matrix.name, 'linux-musl') && matrix.arch == 'x86_64'
-        run: apk update && apk add --no-cache git gcc g++ make cmake sqlite musl-dev linux-headers
+        run: apk update && apk add --no-cache git gcc g++ make cmake sqlite musl-dev linux-headers python3
 
       - uses: actions/checkout@v4.2.2
         with:
@@ -155,7 +155,7 @@ jobs:
             -w /workspace \
             alpine:latest \
             tail -f /dev/null
-          docker exec alpine sh -c "apk update && apk add --no-cache gcc g++ make cmake sqlite musl-dev linux-headers"
+          docker exec alpine sh -c "apk update && apk add --no-cache gcc g++ make cmake sqlite musl-dev linux-headers python3"
 
       - name: linux install opencl
         if: matrix.name == 'linux-gpu'
