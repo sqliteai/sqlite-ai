@@ -200,7 +200,7 @@ jobs:
 
       - name: linux-musl install vulkan
         if: matrix.name == 'linux-musl-gpu'
-        run: ${{ matrix.arch == 'arm64' && 'docker exec alpine' || '' }} apk add --no-cache vulkan-headers vulkan-loader-dev glslc
+        run: ${{ matrix.arch == 'arm64' && 'docker exec alpine' || '' }} apk add --no-cache vulkan-headers vulkan-loader-dev shaderc
 
       - name: cache llama.cpp build
         id: cache-llama
