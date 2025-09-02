@@ -8,7 +8,7 @@ on:
         required: true
         type: string
   workflow_run:
-    workflows: ["Release"]
+    workflows: ["Build, Test and Release"]
     types:
       - completed
 
