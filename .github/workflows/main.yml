@@ -1,4 +1,4 @@
-name: Build, Test and Release SQLite AI
+name: Build, Test and Release
 on:
   push:
   workflow_dispatch:
