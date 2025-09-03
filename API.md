@@ -42,11 +42,24 @@ SELECT ai_log_info(1);
 
 **Description:**
 Loads a GGUF model from the specified file path with optional comma separated key=value configuration.
+If no options are provided the following default value is used: `gpu_layers=99`
+
+The following keys are available:
+```
+gpu_layers=N       (N is the number of layers to store in VRAM)
+main_gpu=K         (K is the GPU that is used for the entire model when split_mode is 0)
+split_mode=N       (how to split the model across multiple GPUs, 0 means none, 1 means layer, 2 means rows)
+vocab_only=1/0     (only load the vocabulary, no weights)
+use_mmap=1/0       (use mmap if possible)
+use_mlock=1/0      (force system to keep model in RAM)
+check_tensors=1/0  (validate model tensor data)
+log_info=1/0       (enable/disable the logging of info)
+```
 
 **Example:**
 
 ```sql
-SELECT llm_model_load('./models/llama.gguf', 'n_predict=512,n_gpu_layers=99');
+SELECT llm_model_load('./models/llama.gguf', 'gpu_layers=99');
 ```
 
 ---
@@ -71,13 +84,75 @@ SELECT llm_model_free();
 **Returns:** `NULL`
 
 **Description:**
-Creates a new inference context with optional with optional comma separated key=value configuration.
-If no context is explicitly created, one will be created automatically when needed.
+Creates a new inference context with comma separated key=value configuration.
+
+Context must explicitly created before performing any AI operation!
+
+The following keys are available:
+```
+```
 
 **Example:**
 
 ```sql
 SELECT llm_context_create('n_ctx=2048');
+```
+
+---
+
+## `llm_context_create_embedding()`
+
+**Returns:** `NULL`
+
+**Description:**
+Creates a new inference context specifically set for embedding generation.
+
+It is equivalent to `SELECT llm_context_create('generate_embedding=1,normalize_embedding=1,pooling_type=last');`
+
+Context must explicitly created before performing any AI operation!
+
+**Example:**
+
+```sql
+SELECT llm_context_create_embedding();
+```
+
+---
+
+## `llm_context_create_chat()`
+
+**Returns:** `NULL`
+
+**Description:**
+Creates a new inference context specifically set for chat conversation.
+
+It is equivalent to `SELECT llm_context_create('context_size=4096');`
+
+Context must explicitly created before performing any AI operation!
+
+**Example:**
+
+```sql
+SELECT llm_context_create_chat();
+```
+
+---
+
+## `llm_context_create_textgen()`
+
+**Returns:** `NULL`
+
+**Description:**
+Creates a new inference context specifically set for text generation.
+
+It is equivalent to `SELECT llm_context_create('context_size=4096');`
+
+Context must explicitly created before performing any AI operation!
+
+**Example:**
+
+```sql
+SELECT llm_context_create_textgen();
 ```
 
 ---
