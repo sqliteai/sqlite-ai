@@ -27,10 +27,10 @@ typedef struct {
 } buffer_t;
 
 // callbacks
-typedef bool (*keyvalue_callback)(void *xdata, const char *key, int key_len, const char *value, int value_len);
+typedef bool (*keyvalue_callback)(void *ctx, void *xdata, const char *key, int key_len, const char *value, int value_len);
 typedef void (*audio_list_devices_callback)(uint32_t count, uint32_t index, const char *name, bool is_default, void *xdata);
 
-bool parse_keyvalue_string (const char *str, keyvalue_callback callback, void *xdata);
+bool parse_keyvalue_string (void *ctx, const char *str, keyvalue_callback callback, void *xdata);
 
 bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, int argc, sqlite3_value **argv, int ntypes, int *types, bool check_llm_model, bool check_audio_model);
 int  sqlite_db_write (sqlite3_context *context, sqlite3 *db, const char *sql, const char **values, int types[], int lens[], int count);

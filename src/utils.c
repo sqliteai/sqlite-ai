@@ -499,7 +499,7 @@ int audio_list_devices (void *xdata, audio_list_devices_callback input_devices_c
 
 // MARK: - General -
 
-bool parse_keyvalue_string (const char *str, keyvalue_callback callback, void *xdata) {
+bool parse_keyvalue_string (void *ctx, const char *str, keyvalue_callback callback, void *xdata) {
     if (!str) return true;
     
     const char *p = str;
@@ -528,7 +528,7 @@ bool parse_keyvalue_string (const char *str, keyvalue_callback callback, void *x
         int val_len = (int)(p - val_start);
         TRIM_TRAILING(val_start, val_len);
         
-        bool rc = callback(xdata, key_start, key_len, val_start, val_len);
+        bool rc = callback(ctx, xdata, key_start, key_len, val_start, val_len);
         if (!rc) return rc;
         
         if (*p == ',') p++;
