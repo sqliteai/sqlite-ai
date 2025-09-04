@@ -107,7 +107,7 @@ SELECT llm_context_create('n_ctx=2048');
 **Description:**
 Creates a new inference context specifically set for embedding generation.
 
-It is equivalent to `SELECT llm_context_create('generate_embedding=1,normalize_embedding=1,pooling_type=last');`
+It is equivalent to `SELECT llm_context_create('generate_embedding=1,normalize_embedding=1,pooling_type=mean');`
 
 Context must explicitly created before performing any AI operation!
 
