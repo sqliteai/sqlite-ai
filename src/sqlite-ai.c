@@ -48,66 +48,64 @@ SQLITE_EXTENSION_INIT1
 #define LOG_TABLE_DECLARATION                   "CREATE TEMP TABLE ai_log (id INTEGER PRIMARY KEY, stamp DATETIME DEFAULT CURRENT_TIMESTAMP, type TEXT, message TEXT);"
 #define LOG_TABLE_INSERT_STMT                   "INSERT INTO ai_log (type, message) VALUES (?, ?);"
 
-#define OPTION_KEY_GENERATE_EMBEDDING           "generate_embedding"
-#define OPTION_KEY_NORMALIZE_EMBEDDING          "normalize_embedding"
+// CONTEXT OPTIONS
+#define OPTION_KEY_CONTEXT_SIZE                 "context_size"
+#define OPTION_KEY_N_CTX                        "n_ctx"
+#define OPTION_KEY_N_BATCH                      "n_batch"
+#define OPTION_KEY_N_UBATCH                     "n_ubatch"
+#define OPTION_KEY_N_SEQ_MAX                    "n_seq_max"
+#define OPTION_KEY_N_THREADS                    "n_threads"
+#define OPTION_KEY_N_THREADS_BATCH              "n_threads_batch"
+#define OPTION_KEY_ROPE_SCALING_TYPE            "rope_scaling_type"
 #define OPTION_KEY_POOLING_TYPE                 "pooling_type"
 #define OPTION_KEY_ATTENTION_TYPE               "attention_type"
-#define OPTION_KEY_MAX_TOKENS                   "max_tokens"
+
+#define OPTION_KEY_ROPE_FREQ_BASE               "rope_freq_base"
+#define OPTION_KEY_ROPE_FREQ_SCALE              "rope_freq_scale"
+#define OPTION_KEY_YARN_EXT_FACTOR              "yarn_ext_factor"
+#define OPTION_KEY_YARN_ATTN_FACTOR             "yarn_attn_factor"
+#define OPTION_KEY_YARN_BETA_FAST               "yarn_beta_fast"
+#define OPTION_KEY_YARN_BETA_SLOW               "yarn_beta_slow"
+#define OPTION_KEY_YARN_ORIG_CTX                "yarn_orig_ctx"
+#define OPTION_KEY_DEFRAG_THOLD                 "defrag_thold"
+#define OPTION_KEY_TYPE_K                       "type_k"
+#define OPTION_KEY_TYPE_V                       "type_v"
+#define OPTION_KEY_OFFLOAD_KQV                  "offload_kqv"
+#define OPTION_KEY_FLASH_ATTN                   "flash_attn"
+#define OPTION_KEY_OP_OFFLOAD                   "op_offload"
+#define OPTION_KEY_SWA_FULL                     "swa_full"
+
+#define OPTION_KEY_GENERATE_EMBEDDING           "generate_embedding"
+#define OPTION_KEY_NORMALIZE_EMBEDDING          "normalize_embedding"
 #define OPTION_KEY_JSON_OUTPUT                  "json_output"
-#define OPTION_KEY_GPU_LAYERS                   "gpu_layers"
-#define OPTION_KEY_CONTEXT_SIZE                 "context_size"
+#define OPTION_KEY_MAX_TOKENS                   "max_tokens"
 #define OPTION_KEY_N_PREDICT                    "n_predict"
+
+
+// MODEL OPTIONS
+#define OPTION_KEY_GPU_LAYERS                   "gpu_layers"
+#define OPTION_KEY_MAIN_GPU                     "main_gpu"
+#define OPTION_KEY_SPLIT_MODE                   "split_mode"
+#define OPTION_KEY_VOCAB_ONLY                   "vocab_only"
+#define OPTION_KEY_USE_MMAP                     "use_mmap"
+#define OPTION_KEY_USE_MLOCK                    "use_mlock"
+#define OPTION_KEY_CHECK_TENSORS                "check_tensors"
+#define OPTION_KEY_LOG_INFO                     "log_info"
 
 #define AI_COLUMN_REPLY                         0
 
-typedef struct {
-    // ** MODEL **
-    int32_t                     gpu_layers;         // number of layers to store in VRAM
-    int32_t                     main_gpu;           // the GPU that is used for the entire model when split_mode is 0
-    enum llama_split_mode       split_mode;         // how to split the model across multiple GPUs
-    bool                        vocab_only;         // only load the vocabulary, no weights
-    bool                        use_mmap;           // use mmap if possible
-    bool                        use_mlock;          // force system to keep model in RAM
-    bool                        check_tensors;      // validate model tensor data
-    bool                        log_info;           // flag to enable/disable the logging of info
-    
-    // ** CONTEXT **
-    uint32_t                    context_size;       // set both n_ctx and n_batch  (*** DONE ***)
-    uint32_t                    n_ctx;              // text context, 0 = from model
-    uint32_t                    n_batch;            // logical maximum batch size that can be submitted to llama_decode
-    uint32_t                    n_ubatch;           // physical maximum batch size
-    uint32_t                    n_seq_max;          // max number of sequences (i.e. distinct states for recurrent models)
-    int32_t                     n_threads;          // number of threads to use for generation
-    int32_t                     n_threads_batch;    // number of threads to use for batch processing
-    enum llama_rope_scaling_type rope_scaling_type; // RoPE scaling type, from `enum llama_rope_scaling_type`
-    enum llama_pooling_type     pooling_type;       // whether to pool (sum) embedding results by sequence id (*** DONE ***)
-    enum llama_attention_type   attention_type;     // attention type to use for embeddings (*** DONE ***)
-    float                       rope_freq_base;     // RoPE base frequency, 0 = from model
-    float                       rope_freq_scale;    // RoPE frequency scaling factor, 0 = from model
-    float                       yarn_ext_factor;    // YaRN extrapolation mix factor, negative = from model
-    float                       yarn_attn_factor;   // YaRN magnitude scaling factor
-    float                       yarn_beta_fast;     // YaRN low correction dim
-    float                       yarn_beta_slow;     // YaRN high correction dim
-    uint32_t                    yarn_orig_ctx;      // YaRN original context size
-    float                       defrag_thold;       // defragment the KV cache if holes/size > thold, <= 0 disabled (default)
-    enum ggml_type              type_k;             // data type for K cache [EXPERIMENTAL]
-    enum ggml_type              type_v;             // data type for V cache [EXPERIMENTAL]
-    bool                        offload_kqv;        // offload the KQV ops (including the KV cache) to GPU
-    bool                        flash_attn;         // use flash attention [EXPERIMENTAL]
-    bool                        op_offload;         // offload host tensor operations to device
-    bool                        swa_full;           // use full-size SWA cache (https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)
+#define AI_DEFAULT_MODEL_OPTIONS                "gpu_layers=99"
+#define AI_DEFAULT_CONTEXT_EMBEDDING_OPTIONS    "generate_embedding=1,normalize_embedding=1,pooling_type=mean"
+#define AI_DEFAULT_CONTEXT_CHAT_OPTIONS         "context_size=4096"
+#define AI_DEFAULT_CONTEXT_TEXTGEN_OPTIONS      "context_size=4096"
 
-    // ** SAMPLER **
-    int                         n_predict;          // number of tokens to predict
-    
-    // ** EMBEDDING **
-    bool                        generate_embedding; // if true, extract embeddings (together with logits)
-    bool                        normalize_embedding;// if true, embeddings are normalized
-    bool                        json_output;        // if true, embedding result is converted to JSON
-    
-    
-    // ** CUSTOM **
-    int32_t                     max_tokens;         // to control max allowed tokens to generate (to control user's input size)
+typedef struct {
+    bool                        log_info;               // flag to enable/disable the logging of info (MODEL)
+    uint32_t                    context_size;           // set both n_ctx and n_batch (CONTEXT)
+    int                         n_predict;              // number of tokens to predict (SAMPLER)
+    bool                        normalize_embedding;    // if true, embeddings are normalized (EMBEDDING)
+    bool                        json_output;            // if true, embedding result is converted to JSON (EMBEDDING)
+    int32_t                     max_tokens;             // to control max allowed tokens to generate (to control user's input size) (CUSTOM)
     
 } llm_options;
 
@@ -191,39 +189,9 @@ typedef enum {
 const char *ROLE_USER       = "user";
 const char *ROLE_ASSISTANT  = "assistant";
 
+void ai_logger (enum ggml_log_level level, const char *text, void *user_data);
+
 // MARK: -
-
-void llm_set_model_options (struct llama_model_params *model_params, llm_options *options) {
-    // number of layers to store in VRAM
-    if (options->gpu_layers) model_params->n_gpu_layers = options->gpu_layers;
-    if (options->split_mode) model_params->split_mode = options->split_mode;
-    if (options->main_gpu) model_params->main_gpu = options->main_gpu;
-    if (options->vocab_only) model_params->vocab_only = options->vocab_only;
-    if (options->use_mmap) model_params->use_mmap = options->use_mmap;
-    if (options->use_mlock) model_params->use_mlock = options->use_mlock;
-    if (options->check_tensors) model_params->check_tensors = options->check_tensors;
-}
-
-void llm_set_context_options (struct llama_context_params *llama_context, llm_options *options) {
-    if (options->generate_embedding) {
-        // https://github.com/ggml-org/llama.cpp/discussions/15093
-        llama_context->embeddings = true;
-        llama_context->pooling_type = LLAMA_POOLING_TYPE_MEAN;
-    }
-    
-    if (options->context_size) {
-        llama_context->n_ctx = options->context_size;
-        llama_context->n_batch = options->context_size;
-    }
-    
-    if (options->pooling_type != LLAMA_POOLING_TYPE_UNSPECIFIED) {
-        llama_context->pooling_type = options->pooling_type;
-    }
-    
-    if (options->attention_type != LLAMA_ATTENTION_TYPE_UNSPECIFIED) {
-        llama_context->attention_type = options->attention_type;
-    }
-}
 
 static void llm_options_init (llm_options *options) {
     memset(options, 0, sizeof(llm_options));
@@ -231,12 +199,11 @@ static void llm_options_init (llm_options *options) {
     options->normalize_embedding = true;
     options->max_tokens = 0;    // no limits
     options->log_info = false;  // disable INFO messages logging
-    options->pooling_type = LLAMA_POOLING_TYPE_UNSPECIFIED;
-    options->attention_type = LLAMA_ATTENTION_TYPE_UNSPECIFIED;
 }
 
-static bool llm_options_callback (void *xdata, const char *key, int key_len, const char *value, int value_len) {
-    llm_options *options = (llm_options *)xdata;
+static bool llm_model_options_callback (void *ctx, void *xdata, const char *key, int key_len, const char *value, int value_len) {
+    struct llama_model_params *options = (struct llama_model_params *)xdata;
+    ai_context *ai = (ai_context *)ctx;
     
     // sanity check (ignore malformed key/value)
     if (!key || key_len == 0) return true;
@@ -250,58 +217,270 @@ static bool llm_options_callback (void *xdata, const char *key, int key_len, con
     size_t len = (value_len > sizeof(buffer)-1) ? sizeof(buffer)-1 : value_len;
     memcpy(buffer, value, len);
     
-    if (strncasecmp(key, OPTION_KEY_GENERATE_EMBEDDING, key_len) == 0) {
+    // MODEL OPTIONS
+    if (strncasecmp(key, OPTION_KEY_GPU_LAYERS, key_len) == 0) {
         int value = (int)strtol(buffer, NULL, 0);
-        options->generate_embedding = (value != 0);
+        options->n_gpu_layers = value;
         return true;
     }
     
+    if (strncasecmp(key, OPTION_KEY_MAIN_GPU, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        options->main_gpu = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_SPLIT_MODE, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0 && value <= 2) options->split_mode = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_VOCAB_ONLY, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        options->vocab_only = (value != 0);
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_USE_MMAP, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        options->use_mmap = (value != 0);
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_USE_MLOCK, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        options->use_mlock = (value != 0);
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_CHECK_TENSORS, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        options->check_tensors = (value != 0);
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_LOG_INFO, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        ai->options.log_info = (value != 0);
+        return true;
+    }
+    
+    return true;
+}
+
+static bool llm_context_options_callback (void *ctx, void *xdata, const char *key, int key_len, const char *value, int value_len) {
+    struct llama_context_params *options = (struct llama_context_params *)xdata;
+    ai_context *ai = (ai_context *)ctx;
+    
+    // sanity check (ignore malformed key/value)
+    if (!key || key_len == 0) return true;
+    if (!value || value_len == 0) return true;
+    
+    // debug
+    // printf("KEY: \"%.*s\", VALUE: \"%.*s\"\n", key_len, key, value_len, value);
+    
+    // convert value to c-string
+    char buffer[256] = {0};
+    size_t len = (value_len > sizeof(buffer)-1) ? sizeof(buffer)-1 : value_len;
+    memcpy(buffer, value, len);
+    
+    // AI CONTEXT (OPTIONS can be NULL)
     if (strncasecmp(key, OPTION_KEY_NORMALIZE_EMBEDDING, key_len) == 0) {
         int value = (int)strtol(buffer, NULL, 0);
-        options->normalize_embedding = (value != 0);
-        return true;
-    }
-    
-    if (strncasecmp(key, OPTION_KEY_POOLING_TYPE, key_len) == 0) {
-        if (strcasecmp(buffer, "none") == 0) options->pooling_type = LLAMA_POOLING_TYPE_NONE;
-        else if (strcasecmp(buffer, "mean") == 0) options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
-        else if (strcasecmp(buffer, "cls") == 0) options->pooling_type = LLAMA_POOLING_TYPE_CLS;
-        else if (strcasecmp(buffer, "last") == 0) options->pooling_type = LLAMA_POOLING_TYPE_LAST;
-        else if (strcasecmp(buffer, "rank") == 0) options->pooling_type = LLAMA_POOLING_TYPE_RANK;
-    }
-    
-    if (strncasecmp(key, OPTION_KEY_ATTENTION_TYPE, key_len) == 0) {
-        if (strcasecmp(buffer, "causal") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_CAUSAL;
-        else if (strcasecmp(buffer, "non_causal") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_NON_CAUSAL;
-    }
-    
-    if (strncasecmp(key, OPTION_KEY_MAX_TOKENS, key_len) == 0) {
-        int value = (int)strtol(buffer, NULL, 0);
-        if (value >= 0) options->max_tokens = value;
+        ai->options.normalize_embedding = (value != 0);
         return true;
     }
     
     if (strncasecmp(key, OPTION_KEY_JSON_OUTPUT, key_len) == 0) {
         int value = (int)strtol(buffer, NULL, 0);
-        options->json_output = (value != 0);
+        ai->options.json_output = (value != 0);
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_GPU_LAYERS, key_len) == 0) {
+    if (strncasecmp(key, OPTION_KEY_MAX_TOKENS, key_len) == 0) {
         int value = (int)strtol(buffer, NULL, 0);
-        options->gpu_layers = value;
-        return true;
-    }
-    
-    if (strncasecmp(key, OPTION_KEY_CONTEXT_SIZE, key_len) == 0) {
-        int value = (int)strtol(buffer, NULL, 0);
-        options->context_size = value;
+        if (value >= 0) ai->options.max_tokens = value;
         return true;
     }
     
     if (strncasecmp(key, OPTION_KEY_N_PREDICT, key_len) == 0) {
         int value = (int)strtol(buffer, NULL, 0);
-        options->n_predict = value;
+        if (value >= 0) ai->options.n_predict = value;
+        return true;
+    }
+    
+    // CONTEXT OPTIONS
+    if (options == NULL) {
+        char buffer[512];
+        snprintf(buffer, sizeof(buffer), "key %.*s ignored because context was already created", key_len, key);
+        ai_logger(GGML_LOG_LEVEL_WARN, buffer, ai);
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_GENERATE_EMBEDDING, key_len) == 0) {
+        // https://github.com/ggml-org/llama.cpp/discussions/15093
+        int value = (int)strtol(buffer, NULL, 0);
+        options->embeddings = (value != 0);
+        options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
+        
+        // for non-causal models, batch size must be equal to ubatch size
+        // when generating embeddings, always tie them together.
+        options->n_ubatch = options->n_batch;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_CONTEXT_SIZE, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0) {
+            options->n_ctx = value;
+            options->n_batch = value;
+        }
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_N_CTX, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0) options->n_ctx = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_N_BATCH, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0) options->n_batch = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_N_UBATCH, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0) options->n_ubatch = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_N_SEQ_MAX, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0) options->n_seq_max = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_N_THREADS, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0) options->n_threads = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_N_THREADS_BATCH, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0) options->n_threads_batch = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_POOLING_TYPE, key_len) == 0) {
+        if (strcasecmp(buffer, "none") == 0) options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
+        // pooling_type mean is not supported and so in this version we forced it to be really mean so ONE EMBEDDING will be generated
+        else if (strcasecmp(buffer, "mean") == 0) options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
+        else if (strcasecmp(buffer, "cls") == 0) options->pooling_type = LLAMA_POOLING_TYPE_CLS;
+        else if (strcasecmp(buffer, "last") == 0) options->pooling_type = LLAMA_POOLING_TYPE_LAST;
+        else if (strcasecmp(buffer, "rank") == 0) options->pooling_type = LLAMA_POOLING_TYPE_RANK;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_ATTENTION_TYPE, key_len) == 0) {
+        if (strcasecmp(buffer, "causal") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_CAUSAL;
+        else if (strcasecmp(buffer, "non_causal") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_NON_CAUSAL;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_ROPE_SCALING_TYPE, key_len) == 0) {
+        if (strcasecmp(buffer, "unspecified") == 0) options->rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED;
+        else if (strcasecmp(buffer, "none") == 0) options->rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_NONE;
+        else if (strcasecmp(buffer, "linear") == 0) options->rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_LINEAR;
+        else if (strcasecmp(buffer, "yarn") == 0) options->rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_YARN;
+        else if (strcasecmp(buffer, "longrope") == 0) options->rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_LONGROPE;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_ROPE_FREQ_BASE, key_len) == 0) {
+        float value = strtof(buffer, NULL);
+        options->rope_freq_base = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_ROPE_FREQ_SCALE, key_len) == 0) {
+        float value = strtof(buffer, NULL);
+        options->rope_freq_scale = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_YARN_EXT_FACTOR, key_len) == 0) {
+        float value = strtof(buffer, NULL);
+        options->yarn_ext_factor = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_YARN_ATTN_FACTOR, key_len) == 0) {
+        float value = strtof(buffer, NULL);
+        options->yarn_attn_factor = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_YARN_BETA_FAST, key_len) == 0) {
+        float value = strtof(buffer, NULL);
+        options->yarn_beta_fast = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_YARN_BETA_SLOW, key_len) == 0) {
+        float value = strtof(buffer, NULL);
+        options->yarn_beta_slow = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_DEFRAG_THOLD, key_len) == 0) {
+        float value = strtof(buffer, NULL);
+        options->defrag_thold = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_YARN_ORIG_CTX, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0) options->yarn_orig_ctx = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_OFFLOAD_KQV, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        options->offload_kqv = (value != 0);
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_FLASH_ATTN, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        options->flash_attn = (value != 0);
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_OP_OFFLOAD, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        options->op_offload = (value != 0);
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_SWA_FULL, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        options->swa_full = (value != 0);
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_TYPE_K, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0) options->type_k = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_TYPE_V, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0) options->type_v = value;
         return true;
     }
     
@@ -335,15 +514,15 @@ static int llm_lora_push (ai_context *ai, struct llama_adapter_lora *lora, float
 
 // MARK: -
 
-static bool whisper_model_options_callback (void *xdata, const char *key, int key_len, const char *value, int value_len) {
-    struct whisper_context_params *whisper_params = (struct whisper_context_params *)xdata;
-    
+static bool whisper_model_options_callback (void *ctx, void *xdata, const char *key, int key_len, const char *value, int value_len) {
+    //struct whisper_context_params *whisper_params = (struct whisper_context_params *)xdata;
+    //ai_context *ai = (ai_context *)ctx;
     return true;
 }
 
-static bool whisper_full_params_options_callback (void *xdata, const char *key, int key_len, const char *value, int value_len) {
-    struct whisper_full_params *params = (struct whisper_full_params *)xdata;
-    
+static bool whisper_full_params_options_callback (void *ctx, void *xdata, const char *key, int key_len, const char *value, int value_len) {
+    //struct whisper_full_params *params = (struct whisper_full_params *)xdata;
+    //ai_context *ai = (ai_context *)ctx;
     return true;
 }
 
@@ -435,21 +614,6 @@ bool ai_model_check (sqlite3_context *context, bool check_llm, bool check_audio)
     return true;
 }
 
-struct llama_context *ai_context_check (ai_context *ai) {
-    if (ai->ctx) return ai->ctx;
-    
-    struct llama_context_params ctx_params = llama_context_default_params();
-    llm_set_context_options(&ctx_params, &ai->options);
-    
-    struct llama_context *ctx = llama_init_from_model(ai->model, ctx_params);
-    if (!ctx) {
-        sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "Unable to create context from model");
-        return NULL;
-    }
-    
-    return ctx;
-}
-
 static bool llm_common_args_check (sqlite3_context *context, const char *function_name, int argc, sqlite3_value **argv, bool check_llm_model) {
     // sanity check arguments
     if (argc == 1) {
@@ -461,6 +625,15 @@ static bool llm_common_args_check (sqlite3_context *context, const char *functio
     }
     
     return sqlite_context_result_error(context, SQLITE_ERROR, "Function '%s' expects 1 or 2 arguments, but %d were provided.", function_name, argc);
+}
+
+static bool llm_check_context (sqlite3_context *context) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (!ai || !ai->ctx) {
+        return sqlite_context_result_error(context, SQLITE_MISUSE, "No context found. Please call llm_context_create() before using this function.");
+    }
+    
+    return true;
 }
 
 // MARK: - Chat Messages -
@@ -533,6 +706,23 @@ static void llm_embed_normalize (const float *src, float *dest, int dim) {
     }
 }
 
+static void llm_batch_clear (struct llama_batch *batch) {
+    batch->n_tokens = 0;
+}
+
+static void llm_batch_add (struct llama_batch *batch, llama_token id, llama_pos pos, const llama_seq_id *seq_ids, size_t n_seq_ids, bool logits) {
+    batch->token   [batch->n_tokens] = id;
+    batch->pos     [batch->n_tokens] = pos;
+    batch->n_seq_id[batch->n_tokens] = (int32_t)n_seq_ids;
+    
+    for (size_t i = 0; i < n_seq_ids; ++i) {
+        batch->seq_id[batch->n_tokens][i] = seq_ids[i];
+    }
+    
+    batch->logits[batch->n_tokens] = logits ? 1 : 0;
+    batch->n_tokens++;
+}
+
 static void llm_embed_generate_run (sqlite3_context *context, const char *text, int32_t text_len) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     struct llama_model *model = ai->model;
@@ -556,17 +746,12 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         return;
     }
     
-    // sanity check context
-    if (!ai->ctx) {
-        ai->options.generate_embedding = true;
-        ai->ctx = ai_context_check(ai);
-    }
-    if (!ai->ctx) return;
-    
+    // pooling is NOT NONE -> one sentence-level embedding
+    // more details in notes/EMBEDDING.md
     struct llama_context *ctx = ai->ctx;
     llama_set_embeddings(ctx, true);
     
-    // sanity check tokens
+    // sanity check context / training window info (warn only)
     const int n_ctx_train = llama_model_n_ctx_train(model);
     const int n_ctx = llama_n_ctx(ctx);
     if (n_ctx > n_ctx_train) {
@@ -575,7 +760,7 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         ai_logger(GGML_LOG_LEVEL_WARN, buffer, sqlite3_context_db_handle(context));
     }
     
-    // sanity check embedding memory
+    // allocate embedding buffer
     int dimension = llama_model_n_embd(llama_get_model(ctx));
     float *embedding = (float *)sqlite3_malloc64(sizeof(float) * dimension);
     if (!embedding) {
@@ -583,7 +768,7 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         return;
     }
     
-    // get token count
+    // get token count (negative return encodes needed size)
     int32_t n_tokens = -llama_tokenize(vocab, text, text_len, NULL, 0, true, true);
     if (n_tokens == 0) {
         sqlite3_free(embedding);
@@ -596,7 +781,14 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         return;
     }
     
-    // allocate memory for tokens
+    // even with chunking, decoder embeddings need the full sequence to be in the KV once
+    if (n_tokens > n_ctx) {
+        sqlite3_free(embedding);
+        sqlite_context_result_error(context, SQLITE_TOOBIG, "Input too large for model context: %d tokens > n_ctx %d. Create a context with a n_ctx value higher than %d.", n_tokens, n_ctx, n_tokens);
+        return;
+    }
+    
+    // allocate tokens and tokenize
     llama_token *tokens = sqlite3_malloc64(n_tokens * sizeof(llama_token));
     if (!tokens) {
         sqlite3_free(embedding);
@@ -613,49 +805,57 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         return;
     }
     
+    // max batch size
+    uint32_t n_batch = llama_n_batch(ctx);
+    
+    size_t pos_base = 0; // running position across chunks
     llama_seq_id sequence_id = 0;
     llama_memory_t memory = llama_get_memory(ctx);
     
-    // before encoding (defensive if anything lingered)
-    if (memory) llama_memory_seq_rm(memory, sequence_id, 0, -1);
+    if (memory) {
+        // start from a clean slate for this sequence
+        llama_memory_seq_rm(memory, sequence_id, 0, -1);
+        
+        // fresh KV for this prompt (only once!)
+        llama_memory_clear(memory, /*clear_kv_cache_only=*/true);
+    }
     
-    // set up batch for processing
+    // LLAMA_POOLING_TYPE_NONE is disabled in this version
     const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
-    llama_batch batch = llama_batch_init(n_tokens, 0, 1);
-    for (int i = 0; i < n_tokens; ++i) {
-        batch.token[batch.n_tokens] = tokens[i];
-        batch.pos[batch.n_tokens] = i;
-        batch.n_seq_id[batch.n_tokens] = 1;
-        batch.seq_id[batch.n_tokens][0] = sequence_id;
-        batch.logits[batch.n_tokens]  = (pooling_type == LLAMA_POOLING_TYPE_NONE) ? 1 : 0; // see comment below
-        batch.n_tokens++;
+    GGML_ASSERT(pooling_type != LLAMA_POOLING_TYPE_NONE);
+    
+    // init batch: n_seq_max = 1 (single prompt), embd = 0
+    llama_batch batch = llama_batch_init(n_batch, 0, 1);
+    while (pos_base < n_tokens) {
+        llm_batch_clear(&batch);
+        
+        size_t to_feed = (n_tokens - pos_base > n_batch) ? n_batch : (n_tokens - pos_base);
+        
+        // fill the batch with up to n_batch tokens
+        for (size_t i = 0; i < to_feed; ++i) {
+            const llama_token tk = (llama_token)tokens[pos_base + i];
+            const llama_pos   ps = (llama_pos)(pos_base + i);
+            const bool want_logits = (i + 1 == to_feed); // last token in this chunk
+            llm_batch_add(&batch, tk, ps, &sequence_id, 1, want_logits);
+        }
+        
+        // run model on this chunk
+        // from ggerganov: If your application is going to support both models with and without a memory, then you should simply call llama_decode() always
+        // https://github.com/ggml-org/llama.cpp/discussions/14454
+        int32_t rc = (memory) ? llama_decode(ctx, batch) : llama_encode(ctx, batch);
+        if (rc < 0) {
+            sqlite3_free(tokens);
+            sqlite3_free(embedding);
+            llama_batch_free(batch);
+            sqlite_context_result_error(context, SQLITE_ERROR, "Model %s failed during embedding generation (%d)", (memory) ? "decode" : "encode", rc);
+            return;
+        }
+        
+        pos_base += to_feed;
     }
-
-    // This optimization is valid when pooling is enabled (MEAN / CLS / LAST).
-    // You only need one “marked” token per sequence to read the sequence-level embedding.
-    // If pooling_type == NONE and you want token-level embeddings, you must set logits=1 for every token you intend to read.
     
-    // last token of this sequence requests outputs
-    batch.logits[batch.n_tokens - 1] = 1;
-    
-    // run model (do real processing)
-    // from ggerganov: If your application is going to support both models with and without a memory, then you should simply call llama_decode() always
-    // https://github.com/ggml-org/llama.cpp/discussions/14454
-    int32_t rc = (memory) ? llama_decode(ctx, batch) : llama_encode(ctx, batch);
-     
-    if (rc < 0) {
-        sqlite3_free(tokens);
-        sqlite3_free(embedding);
-        llama_batch_free(batch);
-        sqlite_context_result_error(context, SQLITE_ERROR, "Model %s failed during embedding generation (%d)", rc, (memory) ? "decode" : "encode");
-        return;
-    }
-    
-    // retrieve embeddings (context set to LLAMA_POOLING_TYPE_MEAN in llama_init_from_model)
-    const float *result = NULL;
-    if (pooling_type == LLAMA_POOLING_TYPE_NONE) result = llama_get_embeddings(ctx);
-    else result = llama_get_embeddings_seq(ctx, sequence_id);
-    
+    // retrieve sentence embedding (pooling is enabled)
+    const float *result = llama_get_embeddings_seq(ctx, sequence_id);
     if (result == NULL) {
         sqlite3_free(tokens);
         sqlite3_free(embedding);
@@ -679,7 +879,7 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         sqlite3_str *s = sqlite3_str_new(sqlite3_context_db_handle(context));
         sqlite3_str_appendchar(s, 1, '[');
         for (int i = 0; i < dimension; i++) {
-            if (i != 0) sqlite3_str_appendchar(s, 1, ',');
+            if (i) sqlite3_str_appendchar(s, 1, ',');
             sqlite3_str_appendf(s, "%.6g", embedding[i]);
         }
         sqlite3_str_appendchar(s, 1, ']');
@@ -688,7 +888,7 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         (json) ? sqlite3_result_text(context, json, -1, sqlite3_free) : sqlite3_result_null(context);
         sqlite3_free(embedding);
     } else {
-        sqlite3_result_blob(context, embedding, sizeof(float) * dimension, sqlite3_free);
+        sqlite3_result_blob(context, embedding, (int)sizeof(float) * dimension, sqlite3_free);
     }
     
     sqlite3_free(tokens);
@@ -696,32 +896,38 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
 }
 
 static void llm_embed_generate (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (llm_check_context(context) == false) return;
     if (llm_common_args_check(context, "llm_embed_generate", argc, argv, true) == false) return;
     
     const char *text = (const char *)sqlite3_value_text(argv[0]);
     int32_t text_len = (int32_t)sqlite3_value_bytes(argv[0]);
     const char *model_options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
     
+    // handle NULL input
+    if (!text || text_len == 0) {
+        sqlite3_result_null(context);
+        return;
+    }
+        
+    // passing NULL as xdata because context has been already created
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(model_options, llm_options_callback, &ai->options) == false) return;
+    if (parse_keyvalue_string(ai, model_options, llm_context_options_callback, NULL) == false) return;
     
-    if (!text || text_len == 0) return;
+    // real processing
     llm_embed_generate_run(context, text, text_len);
 }
 
 static void llm_token_count (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // sanity check args and context
+    if (llm_check_context(context) == false) return;
     if (llm_common_args_check(context, "llm_token_count", argc, argv, true) == false) return;
     
     const char *text = (const char *)sqlite3_value_text(argv[0]);
     int32_t text_len = (int32_t)sqlite3_value_bytes(argv[0]);
     if (!text || text_len == 0) return;
     
-    // sanity check context
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (!ai->ctx) ai->ctx = ai_context_check(ai);
-    if (!ai->ctx) return;
-    
     // sanity check vocab
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
     const struct llama_vocab *vocab = llama_model_get_vocab(ai->model);
     if (!vocab) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Failed to extract vocabulary from the model");
@@ -764,15 +970,7 @@ static void llm_text_run (sqlite3_context *context, const char *text, int32_t te
         sqlite_context_result_error(context, SQLITE_ERROR, "Tokenization size mismatch: got %d tokens, expected %d", n_actual, n_prompt);
         return;
     }
-    
-    // sanity check context
-    int n_predict = (ai->options.n_predict > 0) ? ai->options.n_predict : NPREDICT_DEFAULT_VALUE;
-    if (!ai->ctx) {
-        ai->options.context_size = n_prompt + n_predict - 1; // set both n_ctx and n_batch
-        ai->ctx = ai_context_check(ai);
-    }
-    if (!ai->ctx) return;
-    
+     
     struct llama_context *ctx = ai->ctx;
     if (ctx == NULL) {
         sqlite3_free(tokens);
@@ -796,6 +994,7 @@ static void llm_text_run (sqlite3_context *context, const char *text, int32_t te
     int n_decode = 0;
     llama_token new_token_id;
     buffer_t buffer;
+    int n_predict = (ai->options.n_predict > 0) ? ai->options.n_predict : NPREDICT_DEFAULT_VALUE;
     uint32_t buffer_size = ((n_prompt + n_predict) * MAX_TOKEN_TEXT_LEN); // should be more than enough to avoid a reallocation
     if (!buffer_create(&buffer, buffer_size)) {
         sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate buffer (%d bytes)", buffer_size);
@@ -849,14 +1048,16 @@ cleanup:
 }
 
 static void llm_text_generate (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (llm_check_context(context) == false) return;
     if (llm_common_args_check(context, "llm_text_generate", argc, argv, true) == false) return;
     
     const char *text = (const char *)sqlite3_value_text(argv[0]);
     int32_t text_len = (int32_t)sqlite3_value_bytes(argv[0]);
     const char *options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
     
+    // passing NULL as xdata because context has been already created
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(options, llm_options_callback, &ai->options) == false) {
+    if (parse_keyvalue_string(ai, options, llm_context_options_callback, NULL) == false) {
         sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
         return;
     }
@@ -868,17 +1069,6 @@ static void llm_text_generate (sqlite3_context *context, int argc, sqlite3_value
 // MARK: - Chat -
 
 static bool llm_chat_check_context (ai_context *ai) {
-    // check context
-    if (!ai->ctx) {
-        const char *options = "context_size=4096,n_gpu_layers=99";
-        if (parse_keyvalue_string(options, llm_options_callback, &ai->options) == false) {
-            sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
-            return false;
-        }
-        ai->ctx = ai_context_check(ai);
-        if (!ai->ctx) return false;
-    }
-    
     // check sampler
     if (!ai->sampler) {
         llm_sampler_check(ai);
@@ -1019,7 +1209,6 @@ static bool llm_chat_tokenize_input (ai_context *ai, const char *prompt) {
 }
 
 static bool llm_chat_run (ai_context *ai, ai_cursor *c, const char *user_prompt) {
-    // TODO: what to do if template is not available?
     const char *template = llama_model_chat_template(ai->model, NULL);
     if (!template) {
         sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Template not available");
@@ -1391,6 +1580,8 @@ abort_restore:
 }
 
 static void llm_chat_respond (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (llm_check_context(context) == false) return;
+    
     int types[] = {SQLITE_TEXT};
     if (sqlite_sanity_function(context, "llm_chat_respond", argc, argv, 1, types, true, false) == false) return;
     
@@ -1647,6 +1838,8 @@ static void llm_lora_free (sqlite3_context *context, int argc, sqlite3_value **a
 }
 
 static void llm_lora_load (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (llm_check_context(context) == false) return;
+    
     // sanity check arguments
     int types[] = {SQLITE_TEXT, SQLITE_FLOAT};
     if (sqlite_sanity_function(context, "llm_lora_load", argc, argv, 2, types, true, false) == false) return;
@@ -1696,19 +1889,60 @@ static void llm_context_free (sqlite3_context *context, int argc, sqlite3_value 
     ai->ctx = NULL;
 }
 
-static void llm_context_create (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    // sanity check arguments
-    if ((argc > 0) && llm_common_args_check(context, "llm_context_create", argc, argv, true) == false) return;
-    const char *options = (argc == 1) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
+static bool llm_context_create_with_options (sqlite3_context *context, ai_context *ai, const char *options1, const char *options2) {
+    struct llama_context_params ctx_params = llama_context_default_params();
+    if (parse_keyvalue_string(ai, options1, llm_context_options_callback, &ctx_params) == false) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options1);
+        return false;
+    }
     
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(options, llm_options_callback, &ai->options) == false) {
-        sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
-        return;
+    if (options2) {
+        if (parse_keyvalue_string(ai, options2, llm_context_options_callback, &ctx_params) == false) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options2);
+            return false;
+        }
+    }
+    
+    struct llama_context *ctx = llama_init_from_model(ai->model, ctx_params);
+    if (!ctx) {
+        sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "Unable to create context from model");
+        return false;
     }
     
     if (ai->ctx) llm_context_free(context, 0, NULL);
-    ai->ctx = ai_context_check(ai);
+    ai->ctx = ctx;
+    
+    return true;
+}
+
+static void llm_context_create (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    // sanity check arguments
+    if (llm_common_args_check(context, "llm_context_create", argc, argv, true) == false) return;
+    const char *options = (const char *)sqlite3_value_text(argv[0]);
+    
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_context_create_with_options(context, ai, options, NULL);
+}
+
+static void llm_context_create_embedding (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    const char *options = AI_DEFAULT_CONTEXT_EMBEDDING_OPTIONS;
+    const char *options2 = (argc > 0) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_context_create_with_options(context, ai, options, options2);
+}
+
+static void llm_context_create_chat (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    const char *options = AI_DEFAULT_CONTEXT_CHAT_OPTIONS;
+    const char *options2 = (argc > 0) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_context_create_with_options(context, ai, options, options2);
+}
+
+static void llm_context_create_textgen (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    const char *options = AI_DEFAULT_CONTEXT_TEXTGEN_OPTIONS;
+    const char *options2 = (argc > 0) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_context_create_with_options(context, ai, options, options2);
 }
 
 static void llm_model_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -1722,15 +1956,15 @@ static void llm_model_load (sqlite3_context *context, int argc, sqlite3_value **
     
     const char *model_path = (const char *)sqlite3_value_text(argv[0]);
     const char *model_options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
+    if (model_options == NULL) model_options = AI_DEFAULT_MODEL_OPTIONS;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(model_options, llm_options_callback, &ai->options) == false) {
+    struct llama_model_params model_params = llama_model_default_params();
+    if (parse_keyvalue_string(ai, model_options, llm_model_options_callback, &model_params) == false) {
         sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", model_options);
         return;
     }
     
-    struct llama_model_params model_params = llama_model_default_params();
-    llm_set_model_options(&model_params, &ai->options);
     struct llama_model *model = llama_model_load_from_file(model_path, model_params);
     if (!model) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Unable to load model from file %s", model_path);
@@ -1907,13 +2141,13 @@ static bool audio_process_check_arguments (sqlite3_context *context, const char 
 
 static void audio_process_run (sqlite3_context *context, const float *buffer, uint64_t num_samples, uint32_t sample_rate, uint16_t channels, const char *options) {
     struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    if (parse_keyvalue_string(options, whisper_full_params_options_callback, &params) == false) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (parse_keyvalue_string(ai, options, whisper_full_params_options_callback, &params) == false) {
         sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
         return;
     }
     
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    int rc = whisper_full(ai->whisper, params, buffer, (int)num_samples);
+    // int rc = whisper_full(ai->whisper, params, buffer, (int)num_samples);
 }
 
 static void audio_process_flac (sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -1967,8 +2201,7 @@ static void audio_model_load (sqlite3_context *context, int argc, sqlite3_value 
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     struct whisper_context_params ctx_params = whisper_context_default_params();
-    
-    if (parse_keyvalue_string(model_options, whisper_model_options_callback, &ctx_params) == false) {
+    if (parse_keyvalue_string(ai, model_options, whisper_model_options_callback, &ctx_params) == false) {
         sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", model_options);
         return;
     }
@@ -2047,16 +2280,28 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     rc = sqlite3_create_function(db, "llm_model_free", 0, SQLITE_UTF8, ctx, llm_model_free, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
-    rc = sqlite3_create_function(db, "llm_context_create", 0, SQLITE_UTF8, ctx, llm_context_create, NULL, NULL);
+    rc = sqlite3_create_function(db, "llm_context_create", 1, SQLITE_UTF8, ctx, llm_context_create, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
-    rc = sqlite3_create_function(db, "llm_context_create", 1, SQLITE_UTF8, ctx, llm_context_create, NULL, NULL);
+    rc = sqlite3_create_function(db, "llm_context_create_embedding", 0, SQLITE_UTF8, ctx, llm_context_create_embedding, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_context_create_embedding", 1, SQLITE_UTF8, ctx, llm_context_create_embedding, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_context_create_chat", 0, SQLITE_UTF8, ctx, llm_context_create_chat, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_context_create_chat", 1, SQLITE_UTF8, ctx, llm_context_create_chat, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_context_create_textgen", 0, SQLITE_UTF8, ctx, llm_context_create_textgen, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_context_create_textgen", 1, SQLITE_UTF8, ctx, llm_context_create_textgen, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_context_free", 0, SQLITE_UTF8, ctx, llm_context_free, NULL, NULL);
-    if (rc != SQLITE_OK) goto cleanup;
-    
-    rc = sqlite3_create_function(db, "llm_context_create", 1, SQLITE_UTF8, ctx, llm_context_create, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_lora_load", 2, SQLITE_UTF8, ctx, llm_lora_load, NULL, NULL);
@@ -2207,6 +2452,7 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     if (rc != SQLITE_OK) goto cleanup;
     
     // WHISPER
+    /*
     rc = sqlite3_create_function(db, "audio_model_load", 1, SQLITE_UTF8, ctx, audio_model_load, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
@@ -2215,7 +2461,8 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     
     rc = sqlite3_create_function(db, "audio_model_free", 0, SQLITE_UTF8, ctx, audio_model_free, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
-    
+    */
+     
 cleanup:
     return rc;
 }
