@@ -59,6 +59,7 @@ SQLITE_EXTENSION_INIT1
 #define OPTION_KEY_ROPE_SCALING_TYPE            "rope_scaling_type"
 #define OPTION_KEY_POOLING_TYPE                 "pooling_type"
 #define OPTION_KEY_ATTENTION_TYPE               "attention_type"
+#define OPTION_KEY_FLASH_ATTN_TYPE              "flash_attn_type"
 
 #define OPTION_KEY_ROPE_FREQ_BASE               "rope_freq_base"
 #define OPTION_KEY_ROPE_FREQ_SCALE              "rope_freq_scale"
@@ -71,9 +72,9 @@ SQLITE_EXTENSION_INIT1
 #define OPTION_KEY_TYPE_K                       "type_k"
 #define OPTION_KEY_TYPE_V                       "type_v"
 #define OPTION_KEY_OFFLOAD_KQV                  "offload_kqv"
-#define OPTION_KEY_FLASH_ATTN                   "flash_attn"
 #define OPTION_KEY_OP_OFFLOAD                   "op_offload"
 #define OPTION_KEY_SWA_FULL                     "swa_full"
+#define OPTION_KEY_TYPE_KV_UNIFIED              "kv_unified"
 
 #define OPTION_KEY_GENERATE_EMBEDDING           "generate_embedding"
 #define OPTION_KEY_NORMALIZE_EMBEDDING          "normalize_embedding"
@@ -376,8 +377,9 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
     }
     
     if (strncasecmp(key, OPTION_KEY_POOLING_TYPE, key_len) == 0) {
-        if (strcasecmp(buffer, "none") == 0) options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
         // pooling_type mean is not supported and so in this version we forced it to be really mean so ONE EMBEDDING will be generated
+        if (strcasecmp(buffer, "none") == 0) options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
+        else if (strcasecmp(buffer, "unspecified") == 0) options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
         else if (strcasecmp(buffer, "mean") == 0) options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
         else if (strcasecmp(buffer, "cls") == 0) options->pooling_type = LLAMA_POOLING_TYPE_CLS;
         else if (strcasecmp(buffer, "last") == 0) options->pooling_type = LLAMA_POOLING_TYPE_LAST;
@@ -386,7 +388,8 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
     }
     
     if (strncasecmp(key, OPTION_KEY_ATTENTION_TYPE, key_len) == 0) {
-        if (strcasecmp(buffer, "causal") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_CAUSAL;
+        if (strcasecmp(buffer, "unspecified") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_UNSPECIFIED;
+        else if (strcasecmp(buffer, "causal") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_CAUSAL;
         else if (strcasecmp(buffer, "non_causal") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_NON_CAUSAL;
         return true;
     }
@@ -397,6 +400,13 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
         else if (strcasecmp(buffer, "linear") == 0) options->rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_LINEAR;
         else if (strcasecmp(buffer, "yarn") == 0) options->rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_YARN;
         else if (strcasecmp(buffer, "longrope") == 0) options->rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_LONGROPE;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_FLASH_ATTN_TYPE, key_len) == 0) {
+        if (strcasecmp(buffer, "auto") == 0) options->flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
+        else if (strcasecmp(buffer, "disabled") == 0) options->flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+        else if (strcasecmp(buffer, "enabled") == 0) options->flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
         return true;
     }
     
@@ -454,12 +464,6 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_FLASH_ATTN, key_len) == 0) {
-        int value = (int)strtol(buffer, NULL, 0);
-        options->flash_attn = (value != 0);
-        return true;
-    }
-    
     if (strncasecmp(key, OPTION_KEY_OP_OFFLOAD, key_len) == 0) {
         int value = (int)strtol(buffer, NULL, 0);
         options->op_offload = (value != 0);
@@ -481,6 +485,12 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
     if (strncasecmp(key, OPTION_KEY_TYPE_V, key_len) == 0) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) options->type_v = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_TYPE_KV_UNIFIED, key_len) == 0) {
+        int value = (int)strtol(buffer, NULL, 0);
+        if (value >= 0) options->kv_unified = (value != 0);
         return true;
     }
     
