@@ -18,6 +18,7 @@
 #include "llama.h"
 #include "whisper.h"
 #include "sqlite-ai.h"
+#include "fp16/fp16.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -81,6 +82,7 @@ SQLITE_EXTENSION_INIT1
 #define OPTION_KEY_JSON_OUTPUT                  "json_output"
 #define OPTION_KEY_MAX_TOKENS                   "max_tokens"
 #define OPTION_KEY_N_PREDICT                    "n_predict"
+#define OPTION_KEY_EMBEDDING_TYPE               "embedding_type"
 
 
 // MODEL OPTIONS
@@ -100,14 +102,24 @@ SQLITE_EXTENSION_INIT1
 #define AI_DEFAULT_CONTEXT_CHAT_OPTIONS         "context_size=4096"
 #define AI_DEFAULT_CONTEXT_TEXTGEN_OPTIONS      "context_size=4096"
 
+typedef enum {
+    EMBEDDING_TYPE_F32 = 1,
+    EMBEDDING_TYPE_F16,
+    EMBEDDING_TYPE_BF16,
+    EMBEDDING_TYPE_U8,
+    EMBEDDING_TYPE_I8
+} embedding_type; // same as vector_type from sqlite-vector
+
 typedef struct {
     bool                        log_info;               // flag to enable/disable the logging of info (MODEL)
     uint32_t                    context_size;           // set both n_ctx and n_batch (CONTEXT)
     int                         n_predict;              // number of tokens to predict (SAMPLER)
-    bool                        normalize_embedding;    // if true, embeddings are normalized (EMBEDDING)
-    bool                        json_output;            // if true, embedding result is converted to JSON (EMBEDDING)
     int32_t                     max_tokens;             // to control max allowed tokens to generate (to control user's input size) (CUSTOM)
-    
+    struct {
+        embedding_type          type;
+        bool                    normalize;              // if true, embeddings are normalized
+        bool                    json_output;            // if true, embedding result is converted to JSON
+    } embedding;
 } llm_options;
 
 typedef struct {
@@ -192,12 +204,130 @@ const char *ROLE_ASSISTANT  = "assistant";
 
 void ai_logger (enum ggml_log_level level, const char *text, void *user_data);
 
+// MARK: - NUMERICS -
+// typedef uint16_t bfloat16_t;    // don't typedef to bfloat16_t to avoid mix with <arm_neon.h>’s native bfloat16_t
+
+// float <-> uint32_t bit casts
+static inline uint32_t f32_to_bits (float f) {
+    #if defined(HAVE_BUILTIN_BIT_CAST)
+    return __builtin_bit_cast(uint32_t, f);
+    #else
+    union { float f; uint32_t u; } v = { .f = f };
+    return v.u;
+    #endif
+}
+
+static inline float bits_to_f32 (uint32_t u) {
+    #if defined(HAVE_BUILTIN_BIT_CAST)
+    return __builtin_bit_cast(float, u);
+    #else
+    union { uint32_t u; float f; } v = { .u = u };
+    return v.f;
+    #endif
+}
+
+#if 0
+// bfloat16 (stored as uint16_t) -> float32, and back (RNE)
+static inline bool bfloat16_is_nan (uint16_t h) {      /* exp==0xFF && frac!=0 */
+    return ((h & 0x7F80u) == 0x7F80u) && ((h & 0x007Fu) != 0);
+}
+static inline bool bfloat16_is_inf (uint16_t h) {      /* exp==0xFF && frac==0 */
+    return ((h & 0x7F80u) == 0x7F80u) && ((h & 0x007Fu) == 0);
+}
+static inline bool bfloat16_is_zero (uint16_t h) {     /* ±0 */
+    return (h & 0x7FFFu) == 0;
+}
+static inline int bfloat16_sign (uint16_t h) {
+    return (h >> 15) & 1;
+}
+#endif
+
+static inline float bfloat16_to_float32 (uint16_t bf) {
+    return bits_to_f32((uint32_t)bf << 16);
+}
+static inline uint16_t float32_to_bfloat16 (float f) {
+    uint32_t x = f32_to_bits(f);
+    uint32_t lsb = (x >> 16) & 1u;      /* ties-to-even */
+    uint32_t rnd = 0x7FFFu + lsb;
+    return (uint16_t)((x + rnd) >> 16);
+}
+
+#if 0
+// ---- float16 (binary16) classifiers (work on raw uint16_t bits)
+static inline bool f16_is_nan (uint16_t h) {      /* exp==0x1F && frac!=0 */
+    return ( (h & 0x7C00u) == 0x7C00u ) && ((h & 0x03FFu) != 0);
+}
+static inline bool f16_is_inf (uint16_t h) {      /* exp==0x1F && frac==0 */
+    return ( (h & 0x7C00u) == 0x7C00u ) && ((h & 0x03FFu) == 0);
+}
+static inline int  f16_sign (uint16_t h) {
+    return (h >> 15) & 1;
+}
+static inline bool f16_is_zero (uint16_t h) {     /* ±0 */
+    return (h & 0x7FFFu) == 0;
+}
+#endif
+
+static inline uint16_t float32_to_float16 (float f) {
+    return fp16_ieee_from_fp32_value(f);
+}
+static inline float float16_to_float32 (uint16_t h) {
+    return fp16_ieee_to_fp32_value(h);
+}
+
+static inline uint8_t sat_u8_from_f32 (float x) {
+    if (!isfinite(x)) return x > 0 ? 255 : 0;
+    long v = lrintf(x);                   // round to nearest, ties-to-even
+    if (v < 0)   return 0;
+    if (v > 255) return 255;
+    return (uint8_t)v;
+}
+
+static inline int8_t sat_i8_from_f32 (float x) {
+    if (!isfinite(x)) return x > 0 ? 127 : -128;
+    long v = lrintf(x);
+    if (v < -128) return -128;
+    if (v > 127)  return 127;
+    return (int8_t)v;
+}
+
+static size_t embedding_type_to_size (embedding_type type) {
+    switch (type) {
+        case EMBEDDING_TYPE_F32: return sizeof(float);
+        case EMBEDDING_TYPE_F16: return sizeof(uint16_t);
+        case EMBEDDING_TYPE_BF16: return sizeof(uint16_t);
+        case EMBEDDING_TYPE_U8: return sizeof(uint8_t);
+        case EMBEDDING_TYPE_I8: return sizeof(int8_t);
+    }
+    return 0;
+}
+
+static embedding_type embedding_name_to_type (const char *vname) {
+    if (strcasecmp(vname, "FLOAT32") == 0) return EMBEDDING_TYPE_F32;
+    if (strcasecmp(vname, "FLOAT16") == 0) return EMBEDDING_TYPE_F16;
+    if (strcasecmp(vname, "FLOATB16") == 0) return EMBEDDING_TYPE_BF16;
+    if (strcasecmp(vname, "UINT8") == 0) return EMBEDDING_TYPE_U8;
+    if (strcasecmp(vname, "INT8") == 0) return EMBEDDING_TYPE_I8;
+    return 0;
+}
+
+const char *embedding_type_to_name (embedding_type type) {
+    switch (type) {
+        case EMBEDDING_TYPE_F32: return "FLOAT32";
+        case EMBEDDING_TYPE_F16: return "FLOAT16";
+        case EMBEDDING_TYPE_BF16: return "FLOATB16";
+        case EMBEDDING_TYPE_U8: return "UINT8";
+        case EMBEDDING_TYPE_I8: return "INT8";
+    }
+    return "N/A";
+}
+
 // MARK: -
 
 static void llm_options_init (llm_options *options) {
     memset(options, 0, sizeof(llm_options));
     
-    options->normalize_embedding = true;
+    options->embedding.normalize = true;
     options->max_tokens = 0;    // no limits
     options->log_info = false;  // disable INFO messages logging
 }
@@ -289,13 +419,13 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
     // AI CONTEXT (OPTIONS can be NULL)
     if (strncasecmp(key, OPTION_KEY_NORMALIZE_EMBEDDING, key_len) == 0) {
         int value = (int)strtol(buffer, NULL, 0);
-        ai->options.normalize_embedding = (value != 0);
+        ai->options.embedding.normalize = (value != 0);
         return true;
     }
     
     if (strncasecmp(key, OPTION_KEY_JSON_OUTPUT, key_len) == 0) {
         int value = (int)strtol(buffer, NULL, 0);
-        ai->options.json_output = (value != 0);
+        ai->options.embedding.json_output = (value != 0);
         return true;
     }
     
@@ -308,6 +438,12 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
     if (strncasecmp(key, OPTION_KEY_N_PREDICT, key_len) == 0) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) ai->options.n_predict = value;
+        return true;
+    }
+    
+    if (strncasecmp(key, OPTION_KEY_EMBEDDING_TYPE, key_len) == 0) {
+        int value = embedding_name_to_type(buffer);
+        if (value > 0) ai->options.embedding.type = value;
         return true;
     }
     
@@ -681,9 +817,9 @@ void llm_messages_free (ai_messages *list) {
     list->capacity = 0;
 }
 
-// MARK: - Text Embedding -
+// MARK: - Text Embedding and Normalization -
 
-static void llm_embed_normalize (const float *src, float *dest, int dim) {
+static inline float llm_common_f32_sum (const float *src, int dim) {
     float sum = 0.0f;
     
     // compute L2 norm squared (loop unrolled by 4)
@@ -695,10 +831,16 @@ static void llm_embed_normalize (const float *src, float *dest, int dim) {
         sum += src[i] * src[i];
     }
     
+    return sum;
+}
+
+static int llm_embed_normalize_f32 (const float *src, float *dest, int dim) {
+    float sum = llm_common_f32_sum(src, dim);
+    
     float norm = sqrtf(sum);
     if (norm > 0.0f) {
         float inv = 1.0f / norm;
-        i = 0;
+        int i = 0;
         for (; i + 3 < dim; i += 4) {
             dest[i]     = src[i]     * inv;
             dest[i + 1] = src[i + 1] * inv;
@@ -714,6 +856,187 @@ static void llm_embed_normalize (const float *src, float *dest, int dim) {
             dest[j] = 0.0f;
         }
     }
+    
+    return 0;
+}
+
+static int llm_embed_normalize_f16 (const float *src, uint16_t *dest, int dim) {
+    float sum = llm_common_f32_sum(src, dim);
+
+    if (sum > 0.0f) {
+        float inv = 1.0f / sqrtf(sum);
+        int i = 0;
+        for (; i + 3 < dim; i += 4) {
+            dest[i]     = float32_to_float16(src[i]     * inv);
+            dest[i + 1] = float32_to_float16(src[i + 1] * inv);
+            dest[i + 2] = float32_to_float16(src[i + 2] * inv);
+            dest[i + 3] = float32_to_float16(src[i + 3] * inv);
+        }
+        for (; i < dim; ++i) {
+            dest[i] = float32_to_float16(src[i] * inv);
+        }
+    } else {
+        for (int j = 0; j < dim; ++j) dest[j] = 0; // +0.0
+    }
+    return 0;
+}
+
+static int llm_embed_normalize_bf16 (const float *src, uint16_t *dest, int dim) {
+    float sum = llm_common_f32_sum(src, dim);
+
+    if (sum > 0.0f) {
+        float inv = 1.0f / sqrtf(sum);
+        int i = 0;
+        for (; i + 3 < dim; i += 4) {
+            dest[i]     = float32_to_bfloat16(src[i]     * inv);
+            dest[i + 1] = float32_to_bfloat16(src[i + 1] * inv);
+            dest[i + 2] = float32_to_bfloat16(src[i + 2] * inv);
+            dest[i + 3] = float32_to_bfloat16(src[i + 3] * inv);
+        }
+        for (; i < dim; ++i) {
+            dest[i] = float32_to_bfloat16(src[i] * inv);
+        }
+    } else {
+        for (int j = 0; j < dim; ++j) dest[j] = 0; // +0.0
+    }
+    return 0;
+}
+
+static int llm_embed_normalize_i8 (const float *src, int8_t *dest, int dim) {
+    float sum = llm_common_f32_sum(src, dim);
+
+    if (sum > 0.0f) {
+        float inv = 1.0f / sqrtf(sum);
+        int i = 0;
+        for (; i + 3 < dim; i += 4) {
+            int q0 = (int)lrintf(src[i]     * inv * 127.0f);
+            int q1 = (int)lrintf(src[i + 1] * inv * 127.0f);
+            int q2 = (int)lrintf(src[i + 2] * inv * 127.0f);
+            int q3 = (int)lrintf(src[i + 3] * inv * 127.0f);
+            if (q0 > 127) q0 = 127; else if (q0 < -127) q0 = -127;
+            if (q1 > 127) q1 = 127; else if (q1 < -127) q1 = -127;
+            if (q2 > 127) q2 = 127; else if (q2 < -127) q2 = -127;
+            if (q3 > 127) q3 = 127; else if (q3 < -127) q3 = -127;
+            dest[i]     = (int8_t)q0;
+            dest[i + 1] = (int8_t)q1;
+            dest[i + 2] = (int8_t)q2;
+            dest[i + 3] = (int8_t)q3;
+        }
+        for (; i < dim; ++i) {
+            int q = (int)lrintf(src[i] * inv * 127.0f);
+            if (q > 127) q = 127; else if (q < -127) q = -127;
+            dest[i] = (int8_t)q;
+        }
+    } else {
+        for (int j = 0; j < dim; ++j) dest[j] = 0;
+    }
+    return 0;
+}
+
+static int llm_embed_normalize_u8 (const float *src, uint8_t *dest, int dim) {
+    float sum = llm_common_f32_sum(src, dim);
+
+    if (sum > 0.0f) {
+        float inv = 1.0f / sqrtf(sum);
+        int i = 0;
+        for (; i + 3 < dim; i += 4) {
+            int q0 = (int)lrintf(src[i]     * inv * 127.0f + 128.0f);
+            int q1 = (int)lrintf(src[i + 1] * inv * 127.0f + 128.0f);
+            int q2 = (int)lrintf(src[i + 2] * inv * 127.0f + 128.0f);
+            int q3 = (int)lrintf(src[i + 3] * inv * 127.0f + 128.0f);
+            if (q0 < 0) q0 = 0; else if (q0 > 255) q0 = 255;
+            if (q1 < 0) q1 = 0; else if (q1 > 255) q1 = 255;
+            if (q2 < 0) q2 = 0; else if (q2 > 255) q2 = 255;
+            if (q3 < 0) q3 = 0; else if (q3 > 255) q3 = 255;
+            dest[i]     = (uint8_t)q0;
+            dest[i + 1] = (uint8_t)q1;
+            dest[i + 2] = (uint8_t)q2;
+            dest[i + 3] = (uint8_t)q3;
+        }
+        for (; i < dim; ++i) {
+            int q = (int)lrintf(src[i] * inv * 127.0f + 128.0f);
+            if (q < 0) q = 0; else if (q > 255) q = 255;
+            dest[i] = (uint8_t)q;
+        }
+    } else {
+        // represent zero as the zero-point
+        for (int j = 0; j < dim; ++j) dest[j] = 128;
+    }
+    return 0;
+}
+
+static int llm_embed_normalize (const float *src, void *dest, embedding_type type, int dim) {
+    switch (type) {
+        case EMBEDDING_TYPE_F32: return llm_embed_normalize_f32(src, (float *)dest, dim);
+        case EMBEDDING_TYPE_F16: return llm_embed_normalize_f16(src, (uint16_t *)dest, dim);
+        case EMBEDDING_TYPE_BF16: return llm_embed_normalize_bf16(src, (uint16_t *)dest, dim);
+        case EMBEDDING_TYPE_U8: return llm_embed_normalize_u8(src, (uint8_t *)dest, dim);
+        case EMBEDDING_TYPE_I8: return llm_embed_normalize_i8(src, (int8_t *)dest, dim);
+    }
+    return 0;
+}
+
+static int llm_embed_copy (const float *src, void *dest, embedding_type type, int dim, int bsize) {
+    switch (type) {
+        case EMBEDDING_TYPE_F32:
+            // if embedding size is the same as src then just copy src into dest
+            memcpy(dest, src, bsize);
+            break;
+            
+        case EMBEDDING_TYPE_F16: {
+            uint16_t *buffer = (uint16_t *)dest;
+            int i = 0;
+            for (; i + 3 < dim; i += 4) {
+                buffer[i+0] = float32_to_float16(src[i+0]);
+                buffer[i+1] = float32_to_float16(src[i+1]);
+                buffer[i+2] = float32_to_float16(src[i+2]);
+                buffer[i+3] = float32_to_float16(src[i+3]);
+            }
+            for (; i < dim; ++i) buffer[i] = float32_to_float16(src[i]);
+            break;
+        }
+            
+        case EMBEDDING_TYPE_BF16: {
+            uint16_t *buffer = (uint16_t *)dest;
+            int i = 0;
+            for (; i + 3 < dim; i += 4) {
+                buffer[i+0] = float32_to_bfloat16(src[i+0]);
+                buffer[i+1] = float32_to_bfloat16(src[i+1]);
+                buffer[i+2] = float32_to_bfloat16(src[i+2]);
+                buffer[i+3] = float32_to_bfloat16(src[i+3]);
+            }
+            for (; i < dim; ++i) buffer[i] = float32_to_bfloat16(src[i]);
+            break;
+        }
+            
+        case EMBEDDING_TYPE_U8: {
+            uint8_t *buffer = (uint8_t *)dest;
+            int i = 0;
+            for (; i + 3 < dim; i += 4) {
+                buffer[i+0] = sat_u8_from_f32(src[i+0]);
+                buffer[i+1] = sat_u8_from_f32(src[i+1]);
+                buffer[i+2] = sat_u8_from_f32(src[i+2]);
+                buffer[i+3] = sat_u8_from_f32(src[i+3]);
+            }
+            for (; i < dim; ++i) buffer[i] = sat_u8_from_f32(src[i]);
+            break;
+        }
+            
+        case EMBEDDING_TYPE_I8: {
+            int8_t *buffer = (int8_t *)dest;
+            int i = 0;
+            for (; i + 3 < dim; i += 4) {
+                buffer[i+0] = sat_i8_from_f32(src[i+0]);
+                buffer[i+1] = sat_i8_from_f32(src[i+1]);
+                buffer[i+2] = sat_i8_from_f32(src[i+2]);
+                buffer[i+3] = sat_i8_from_f32(src[i+3]);
+            }
+            for (; i < dim; ++i) buffer[i] = sat_i8_from_f32(src[i]);
+            break;
+        }
+    }
+    
+    return 0;
 }
 
 static void llm_batch_clear (struct llama_batch *batch) {
@@ -732,6 +1055,46 @@ static void llm_batch_add (struct llama_batch *batch, llama_token id, llama_pos 
     batch->logits[batch->n_tokens] = logits ? 1 : 0;
     batch->n_tokens++;
 }
+
+#if 0
+static void llm_embed_debug (const void *buf, embedding_type type, int n) {
+    printf("type: %s - dim: %d [", embedding_type_to_name(type), n);
+    for (int i=0; i<n; ++i) {
+        switch (type) {
+            case EMBEDDING_TYPE_F32: {
+                float *f = (float *)buf;
+                printf("%f,", f[i]);
+            }
+            break;
+                
+            case EMBEDDING_TYPE_F16: {
+                uint16_t *f = (uint16_t *)buf;
+                printf("%f,", float16_to_float32(f[i]));
+            }
+            break;
+                
+            case EMBEDDING_TYPE_BF16: {
+                uint16_t *f = (uint16_t *)buf;
+                printf("%f,", bfloat16_to_float32(f[i]));
+            }
+            break;
+                
+            case EMBEDDING_TYPE_U8: {
+                uint8_t *u = (uint8_t *)buf;
+                printf("%d,", u[i]);
+            }
+            break;
+                
+            case EMBEDDING_TYPE_I8: {
+                int8_t *u = (int8_t *)buf;
+                printf("%d,", u[i]);
+            }
+            break;
+        }
+    }
+    printf("]\n");
+}
+#endif
 
 static void llm_embed_generate_run (sqlite3_context *context, const char *text, int32_t text_len) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
@@ -772,9 +1135,11 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     
     // allocate embedding buffer
     int dimension = llama_model_n_embd(llama_get_model(ctx));
-    float *embedding = (float *)sqlite3_malloc64(sizeof(float) * dimension);
+    embedding_type type = ai->options.embedding.type;
+    int embedding_size = (int)embedding_type_to_size(type) * dimension;
+    void *embedding = (void *)sqlite3_malloc64(embedding_size);
     if (!embedding) {
-        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate embedding buffer of dimension %d", dimension);
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate embedding buffer of size %d", embedding_size);
         return;
     }
     
@@ -874,8 +1239,15 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         return;
     }
     
+    // llm_embed_debug((const void *)result, EMBEDDING_TYPE_F32, dimension);
+    
     // check if normalization is needed (default true)
-    (ai->options.normalize_embedding) ? llm_embed_normalize(result, embedding, dimension) : memcpy(embedding, result, sizeof(float) * dimension);
+    if (ai->options.embedding.normalize) {
+        llm_embed_normalize(result, embedding, type, dimension);
+    } else {
+        // copy buffer
+        llm_embed_copy(result, embedding, type, dimension, embedding_size);
+    }
     
     // IMPORTANT: clear memory for this sequence so the next call starts clean
     if (memory) {
@@ -884,13 +1256,38 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         llama_memory_clear(memory, true);
     }
     
+    // llm_embed_debug(embedding, type, dimension);
+    
     // check if JSON output is set
-    if (ai->options.json_output) {
+    if (ai->options.embedding.json_output) {
         sqlite3_str *s = sqlite3_str_new(sqlite3_context_db_handle(context));
         sqlite3_str_appendchar(s, 1, '[');
         for (int i = 0; i < dimension; i++) {
             if (i) sqlite3_str_appendchar(s, 1, ',');
-            sqlite3_str_appendf(s, "%.6g", embedding[i]);
+            float value = 0.0;
+            
+            switch (type) {
+                case EMBEDDING_TYPE_F32:
+                    value = ((float *)embedding)[i];
+                    break;
+                    
+                case EMBEDDING_TYPE_F16:
+                    value = float16_to_float32(((uint16_t *)embedding)[i]);
+                    break;
+                
+                case EMBEDDING_TYPE_BF16:
+                    value = bfloat16_to_float32(((uint16_t *)embedding)[i]);
+                    break;
+                
+                case EMBEDDING_TYPE_U8:
+                    value = (float)(((uint8_t *)embedding)[i]);
+                    break;
+                
+                case EMBEDDING_TYPE_I8:
+                    value = (float)(((int8_t *)embedding)[i]);
+                    break;
+            }
+            sqlite3_str_appendf(s, "%.6g", value);
         }
         sqlite3_str_appendchar(s, 1, ']');
         
@@ -898,7 +1295,7 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         (json) ? sqlite3_result_text(context, json, -1, sqlite3_free) : sqlite3_result_null(context);
         sqlite3_free(embedding);
     } else {
-        sqlite3_result_blob(context, embedding, (int)sizeof(float) * dimension, sqlite3_free);
+        sqlite3_result_blob(context, embedding, embedding_size, sqlite3_free);
     }
     
     sqlite3_free(tokens);
@@ -1911,6 +2308,12 @@ static bool llm_context_create_with_options (sqlite3_context *context, ai_contex
             sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options2);
             return false;
         }
+    }
+    
+    // sanity check embedding_type
+    if (ctx_params.embeddings && ai->options.embedding.type == 0) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Embedding type must be specified in the create context funtion");
+        return false;
     }
     
     struct llama_context *ctx = llama_init_from_model(ai->model, ctx_params);
