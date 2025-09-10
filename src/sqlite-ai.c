@@ -2312,7 +2312,7 @@ static bool llm_context_create_with_options (sqlite3_context *context, ai_contex
     
     // sanity check embedding_type
     if (ctx_params.embeddings && ai->options.embedding.type == 0) {
-        sqlite_context_result_error(context, SQLITE_ERROR, "Embedding type must be specified in the create context funtion");
+        sqlite_context_result_error(context, SQLITE_ERROR, "Embedding type (embedding_type) must be specified in the create context funtion");
         return false;
     }
     
@@ -2332,7 +2332,11 @@ static void llm_context_create (sqlite3_context *context, int argc, sqlite3_valu
     // sanity check arguments
     if (llm_common_args_check(context, "llm_context_create", argc, argv, true) == false) return;
     const char *options = (const char *)sqlite3_value_text(argv[0]);
-    
+    if ((options == NULL) || (strlen(options) == 0)) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Non empty options must be specified when calling llm_context_create");
+        return;
+    }
+        
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_context_create_with_options(context, ai, options, NULL);
 }
