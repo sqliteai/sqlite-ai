@@ -79,28 +79,99 @@ SELECT llm_model_free();
 
 ---
 
-## `llm_context_create(options TEXT)`
+## `llm_context_create(context_settings TEXT)`
+
+**Parameters:** context_settings: comma-separated key=value pairs (see [context settings](#context settings)).
 
 **Returns:** `NULL`
 
 **Description:**
 Creates a new inference context with comma separated key=value configuration.
 
-Context must explicitly created before performing any AI operation!
+**Context must explicitly created before performing any AI operation!**
 
-The following keys are available:
-```
-```
+## context_settings
+The following keys are available in context_settings:
+
+### General
+
+| Key                     | Type     | Meaning                                                          |
+| ------------------------| -------- | ---------------------------------------------------------------- |
+| `generate_embedding`    | `1 or 0`                                   | Force the model to generate embeddings.            |
+| `normalize_embedding`   | `1 or 0`                                   | Force normalization during embedding generation (default to 1).  |
+| `json_output`           | `1 or 0`                                   | Force JSON output in embedding generation (default to 0). |
+| `max_tokens`            | `number`                                   | Set a maximum number of tokens in input. If input is too large then an error is returned. |
+| `n_predict`             | `number`                                   | Control the maximum number of tokens generated during text generation.                    |
+| `embedding_type`        | `FLOAT32, FLOAT16, BFLOAT16, UINT8, INT8`  | Set the model native type, mandatory during embedding generation.                   |
+
+### Core sizing & threading
+
+| Key                      | Type     | Meaning                                                          |
+| ------------------------ | -------- | ---------------------------------------------------------------- |
+| `context_size`           | `number` | Equivalent to n_ctx = N and n_batch = N.                         |
+| `n_ctx`                  | `number` | Text context length (tokens). `0` = from model.                  |
+| `n_batch`                | `number` | **Logical** max batch size submitted to `llama_decode`.          |
+| `n_ubatch`               | `number` | **Physical** max micro-batch size.                               |
+| `n_seq_max`              | `number` | Max concurrent sequences (parallel states for recurrent models). |
+| `n_threads`              | `number` | Threads for generation.                                          |
+| `n_threads_batch`        | `number` | Threads for batch processing.                                    |
+
+### Attention, pooling & flash-attention
+
+| Key               | Type                         | Meaning                                           |
+| ----------------- | ---------------------------- | ------------------------------------------------- |
+| `pooling_type`    | `none, unspecified, mean, cls, last or rank`    | How to aggregate token embeddings (e.g., `mean`). |
+| `attention_type`  | `unspecified, causal, non_causal`  | Attention algorithm for embeddings.               |
+| `flash_attn_type` | `auto, disabled, enabled` | Controls when/if Flash-Attention is used.         |
+
+### RoPE & YaRN (positional scaling)
+
+| Key                 | Type                           | Meaning                                           |
+| ------------------- | ------------------------------ | ------------------------------------------------- |
+| `rope_scaling_type` | `unspecified, none, linear, yarn, longrope` | RoPE scaling strategy.                            |
+| `rope_freq_base`    | `float number`                        | RoPE base frequency. `0` = from model.            |
+| `rope_freq_scale`   | `float number`                        | RoPE frequency scaling factor. `0` = from model.  |
+| `yarn_ext_factor`   | `float number`                        | YaRN extrapolation mix factor. `<0` = from model. |
+| `yarn_attn_factor`  | `float number`                        | YaRN magnitude scaling.                           |
+| `yarn_beta_fast`    | `float number`                        | YaRN low correction dimension.                    |
+| `yarn_beta_slow`    | `float number`                        | YaRN high correction dimension.                   |
+| `yarn_orig_ctx`     | `number`                       | YaRN original context size.                       |
+
+### KV cache types (experimental)
+
+| Key      | Type             | Meaning                |
+| -------- | ---------------- | ---------------------- |
+| `type_k` | [ggml_type](https://github.com/ggml-org/llama.cpp/blob/00681dfc16ba4cebb9c7fbd2cf2656e06a0692a4/ggml/include/ggml.h#L377) | Data type for K cache. |
+| `type_v` | [ggml_type](https://github.com/ggml-org/llama.cpp/blob/00681dfc16ba4cebb9c7fbd2cf2656e06a0692a4/ggml/include/ggml.h#L377) | Data type for V cache. |
+
+### Flags
+
+> Place booleans at the end of your option string if you’re copy-by-value mirroring a struct; otherwise order doesn’t matter.
+
+| Key            | Type    | Meaning                                                                                                                                    |
+| -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `embeddings`   | `1 or 0`  | If `1`, extract embeddings (with logits). Used by the embedding preset.                                                                 |
+| `offload_kqv`  | `1 or 0`  | Offload KQV ops (incl. KV cache) to GPU.                                                                                                   |
+| `no_perf`      | `1 or 0`  | Disable performance timing.                                                                                                                |
+| `op_offload`   | `1 or 0`  | Offload host tensor ops to device.                                                                                                         |
+| `swa_full`     | `1 or 0`  | Use full-size SWA cache. When `false` and `n_seq_max > 1`, performance may degrade.                                                        |
+| `kv_unified`   | `1 or 0`  | Use a unified buffer across input sequences during attention. Try disabling when `n_seq_max > 1` and sequences do not share a long prefix. |
+| `defrag_thold` | `float number` | **Deprecated.** Defragment KV cache if `holes/size > thold`. `<= 0` disables.                                                              |
+
+---
+
 
 **Example:**
 
 ```sql
-SELECT llm_context_create('n_ctx=2048');
+SELECT llm_context_create('n_ctx=2048,n_threads=6,n_batch=256');
 ```
 
 ---
 
-## `llm_context_create_embedding()`
+## `llm_context_create_embedding(context_settings TEXT)`
+
+**Parameters:** **`context_settings` (optional):** Comma-separated `key=value` pairs to override or extend default settings (see [context settings](#context_settings) in `llm_context_create`).
 
 **Returns:** `NULL`
 
@@ -109,7 +180,7 @@ Creates a new inference context specifically set for embedding generation.
 
 It is equivalent to `SELECT llm_context_create('generate_embedding=1,normalize_embedding=1,pooling_type=mean');`
 
-Context must explicitly created before performing any AI operation!
+**Context must explicitly created before performing any AI operation!**
 
 **Example:**
 
@@ -119,7 +190,9 @@ SELECT llm_context_create_embedding();
 
 ---
 
-## `llm_context_create_chat()`
+## `llm_context_create_chat(context_settings TEXT)`
+
+**Parameters:** **`context_settings` (optional):** Comma-separated `key=value` pairs to override or extend default settings (see [context settings](#context_settings) in `llm_context_create`).
 
 **Returns:** `NULL`
 
@@ -138,7 +211,9 @@ SELECT llm_context_create_chat();
 
 ---
 
-## `llm_context_create_textgen()`
+## `llm_context_create_textgen(context_settings TEXT)`
+
+**Parameters:** **`context_settings` (optional):** Comma-separated `key=value` pairs to override or extend default settings (see [context settings](#context_settings) in `llm_context_create`).
 
 **Returns:** `NULL`
 
