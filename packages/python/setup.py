@@ -1,68 +1,56 @@
-import setuptools
-import toml
 import os
-import sys
+from setuptools import setup
+from setuptools.command.bdist_wheel import bdist_wheel
 
-usage = """
-Usage: python setup.py bdist_wheel --plat-name <platform>
-The PACKAGE_VERSION environment variable must be set to the desired version.
 
-Example:
-  PACKAGE_VERSION=0.5.9 python setup.py bdist_wheel --plat-name linux_x86_64
-"""
+class PlatformSpecificWheel(bdist_wheel):
+    """Custom bdist_wheel to force platform-specific wheel."""
 
-with open("pyproject.toml", "r") as f:
-    pyproject = toml.load(f)
+    def finalize_options(self):
+        bdist_wheel.finalize_options(self)
+        # Force platform-specific wheel
+        self.root_is_pure = False
 
-project = pyproject["project"]
+        # Set platform name from environment if provided
+        plat_name = os.environ.get("PLAT_NAME")
+        if plat_name:
+            self.plat_name = plat_name
 
-# Get version from environment or default
-version = os.environ.get("PACKAGE_VERSION", "")
-if not version:
-    print("PACKAGE_VERSION environment variable is not set.")
-    print(usage)
-    sys.exit(1)
+    def get_tag(self):
+        # Force platform-specific tags with broader compatibility
+        python_tag, abi_tag, platform_tag = bdist_wheel.get_tag(self)
 
-# Get Python platform name from --plat-name argument
-plat_name = None
-for i, arg in enumerate(sys.argv):
-    if arg == "--plat-name" and i + 1 < len(sys.argv):
-        plat_name = sys.argv[i + 1]
-        break
+        # Override platform tag if specified
+        plat_name = os.environ.get("PLAT_NAME")
+        if plat_name:
+            platform_tag = plat_name
 
-if not plat_name:
-    print("Error: --plat-name argument is required")
-    print(usage)
-    sys.exit(1)
+        # Use py3 for broader Python compatibility since we have pre-built binaries
+        python_tag = "py3"
+        abi_tag = "none"
 
-# Map plat_name to classifier
-classifier_map = {
-    "manylinux2014_x86_64": "Operating System :: POSIX :: Linux",
-    "manylinux2014_aarch64": "Operating System :: POSIX :: Linux",
-    "win_amd64": "Operating System :: Microsoft :: Windows",
-    "macosx_10_9_x86_64": "Operating System :: MacOS",
-    "macosx_11_0_arm64": "Operating System :: MacOS",
-}
+        return python_tag, abi_tag, platform_tag
 
-classifier = classifier_map.get(plat_name)
-if not classifier:
-    print(f"Unknown plat_name: {plat_name}")
-    sys.exit(1)
 
-with open("README.md", "r", encoding="utf-8") as f:
-    long_description = f.read()
+def get_platform_classifiers():
+    """Get platform-specific classifiers based on PLAT_NAME environment variable."""
+    classifier_map = {
+        "manylinux2014_x86_64": ["Operating System :: POSIX :: Linux"],
+        "manylinux2014_aarch64": ["Operating System :: POSIX :: Linux"],
+        "win_amd64": ["Operating System :: Microsoft :: Windows"],
+        "macosx_10_9_x86_64": ["Operating System :: MacOS"],
+        "macosx_11_0_arm64": ["Operating System :: MacOS"],
+    }
 
-setuptools.setup(
-    name=project["name"],
-    version=version,
-    description=project.get("description", ""),
-    author=project["authors"][0]["name"] if project.get("authors") else "",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url=project["urls"]["Homepage"],
-    packages=setuptools.find_packages(where="src"),
-    package_dir={"": "src"},
-    include_package_data=True,
-    python_requires=project.get("requires-python", ">=3"),
-    classifiers=project.get("classifiers", []),
-)
+    plat_name = os.environ.get("PLAT_NAME")
+    if plat_name and plat_name in classifier_map:
+        return ["Programming Language :: Python :: 3", classifier_map[plat_name][0]]
+
+    raise ValueError(f"Unsupported or missing PLAT_NAME: {plat_name}")
+
+
+if __name__ == "__main__":
+    setup(
+        cmdclass={"bdist_wheel": PlatformSpecificWheel},
+        classifiers=get_platform_classifiers(),
+    )

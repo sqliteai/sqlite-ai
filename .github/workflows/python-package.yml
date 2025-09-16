@@ -87,9 +87,10 @@ jobs:
       - name: Build wheel
         env:
           PACKAGE_VERSION: ${{ steps.get_version.outputs.version }}
+          PLAT_NAME: ${{ matrix.plat_name }}
         run: |
           cd packages/python
-          python setup.py bdist_wheel --plat-name "${{ matrix.plat_name }}"
+          python -m build --wheel
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -99,4 +100,4 @@ jobs:
           # Avoid workflow to fail if the version has already been published
           skip-existing: true
           # Upload to Test Pypi for testing
-          # repository-url: https://test.pypi.org/legacy/
+          #repository-url: https://test.pypi.org/legacy/
