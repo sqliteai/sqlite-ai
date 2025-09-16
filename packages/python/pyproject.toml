@@ -1,25 +1,32 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "toml"]
+requires = ["setuptools>=61.0", "build", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "sqlite-ai"
-dynamic = ["version"]
+dynamic = ["version", "classifiers"]
 description = "Python prebuilt binaries for SQLite AI extension for all supported platforms and architectures."
 authors = [
     { name = "SQLite AI Team" }
 ]
 readme = "README.md"
+license = "LicenseRef-Elastic-2.0-Modified-For-Open-Source-Use"
+license-files = ["LICENSE.md"]
 requires-python = ">=3"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "Operating System :: POSIX :: Linux",
-    "Operating System :: Microsoft :: Windows",
-    "Operating System :: MacOS :: MacOS X"
-]
 
 [project.urls]
 Homepage = "https://sqlite.ai"
 Documentation = "https://github.com/sqliteai/sqlite-ai/blob/main/API.md"
 Repository = "https://github.com/sqliteai/sqlite-ai"
 Issues = "https://github.com/sqliteai/sqlite-ai/issues"
+
+[tool.setuptools]
+packages = {find = {where = ["src"]}}
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "sqliteai._version.__version__"}
+
+[tool.bdist_wheel]
+# Force platform-specific wheels
+universal = false
