@@ -50,7 +50,6 @@ SQLITE_EXTENSION_INIT1
 #define LOG_TABLE_INSERT_STMT                   "INSERT INTO ai_log (type, message) VALUES (?, ?);"
 
 // CONTEXT OPTIONS
-#define OPTION_KEY_CONTEXT_SIZE                 "context_size"
 #define OPTION_KEY_N_CTX                        "n_ctx"
 #define OPTION_KEY_N_BATCH                      "n_batch"
 #define OPTION_KEY_N_UBATCH                     "n_ubatch"
@@ -77,6 +76,8 @@ SQLITE_EXTENSION_INIT1
 #define OPTION_KEY_SWA_FULL                     "swa_full"
 #define OPTION_KEY_TYPE_KV_UNIFIED              "kv_unified"
 
+// CUSTOM
+#define OPTION_KEY_CONTEXT_SIZE                 "context_size"
 #define OPTION_KEY_GENERATE_EMBEDDING           "generate_embedding"
 #define OPTION_KEY_NORMALIZE_EMBEDDING          "normalize_embedding"
 #define OPTION_KEY_JSON_OUTPUT                  "json_output"
