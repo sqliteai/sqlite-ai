@@ -9,3 +9,4 @@
 *.sqlite
 *.a
 .vscode
+.build
