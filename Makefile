@@ -103,23 +103,21 @@ else ifeq ($(PLATFORM),ios)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
 	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
-	WHISPER_LDFLAGS += -lwhisper.coreml
-	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
+	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Accelerate -framework Metal -framework Foundation -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework CoreFoundation -framework Security -ldl -lpthread -lm -dynamiclib $(SDK)
 	CFLAGS += -arch arm64 -x objective-c $(SDK)
 	LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
-	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DWHISPER_COREML=ON
-	MINIAUDIO_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_C_FLAGS="-x objective-c"
+	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+	MINIAUDIO_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DMINIAUDIO_NO_RUNTIME_LINKING=ON
 	STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),ios-sim)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=14.0
 	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
-	WHISPER_LDFLAGS += -lwhisper.coreml
-	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Accelerate -framework Metal -framework Foundation -framework CoreML -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework Security -ldl -dynamiclib $(SDK)
+	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Accelerate -framework Metal -framework Foundation -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework CoreFoundation -framework Security -ldl -lpthread -lm -dynamiclib $(SDK)
 	CFLAGS += -arch x86_64 -arch arm64 -x objective-c $(SDK)
 	LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
-	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DWHISPER_COREML=ON
-	MINIAUDIO_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_C_FLAGS="-x objective-c"
+	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+	MINIAUDIO_OPTIONS += -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DMINIAUDIO_NO_RUNTIME_LINKING=ON
 	STRIP = strip -x -S $@
 else # linux
 	TARGET := $(DIST_DIR)/ai.so
@@ -164,7 +162,7 @@ ifneq (,$(findstring BLAS,$(LLAMA)))
 		LLAMA_LDFLAGS += -lblas
 	endif
 endif
-ifneq (,$(findstring COREML,$(WHISPER))) # CoreML - only macos
+ifneq (,$(findstring COREML,$(WHISPER))) # CoreML - only Apple platforms
 	WHISPER_LIBS += $(BUILD_WHISPER)/src/libwhisper.coreml.a
 	WHISPER_LDFLAGS += -lwhisper.coreml
 	WHISPER_OPTIONS += -DWHISPER_COREML=ON
@@ -222,6 +220,16 @@ $(BUILD_DIR)/whisper.cpp.stamp: $(BUILD_DIR)/llama.cpp.stamp
 
 $(BUILD_DIR)/miniaudio.stamp:
 	cmake -B $(BUILD_MINIAUDIO) $(MINIAUDIO_OPTIONS) $(MINIAUDIO_DIR)
+ifeq ($(PLATFORM),ios)
+	# Patch the build files to add Objective-C flag for iOS
+	sed -i.bak 's/\(C_FLAGS = \)/\1-x objective-c /' $(BUILD_MINIAUDIO)/CMakeFiles/miniaudio.dir/flags.make
+	sed -i.bak 's/\(C_FLAGS = \)/\1-x objective-c /' $(BUILD_MINIAUDIO)/CMakeFiles/miniaudio_*.dir/flags.make || true
+endif
+ifeq ($(PLATFORM),ios-sim)
+	# Patch the build files to add Objective-C flag for iOS simulator
+	sed -i.bak 's/\(C_FLAGS = \)/\1-x objective-c /' $(BUILD_MINIAUDIO)/CMakeFiles/miniaudio.dir/flags.make
+	sed -i.bak 's/\(C_FLAGS = \)/\1-x objective-c /' $(BUILD_MINIAUDIO)/CMakeFiles/miniaudio_*.dir/flags.make || true
+endif
 	cmake --build $(BUILD_MINIAUDIO) --config Release $(MINIAUDIO_ARGS) $(ARGS)
 	touch $@
 
