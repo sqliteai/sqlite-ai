@@ -46,7 +46,7 @@ SQLITE_EXTENSION_INIT1
 #define MIN_ALLOC_MESSAGES                      256
 #define MAX_LORAS                               64      // max 2 or 3 LoRa adapters are used (usually just one)
 
-#define LOG_TABLE_DECLARATION                   "CREATE TEMP TABLE ai_log (id INTEGER PRIMARY KEY, stamp DATETIME DEFAULT CURRENT_TIMESTAMP, type TEXT, message TEXT);"
+#define LOG_TABLE_DECLARATION                   "CREATE TEMP TABLE IF NOT EXISTS ai_log (id INTEGER PRIMARY KEY, stamp DATETIME DEFAULT CURRENT_TIMESTAMP, type TEXT, message TEXT);"
 #define LOG_TABLE_INSERT_STMT                   "INSERT INTO ai_log (type, message) VALUES (?, ?);"
 
 // CONTEXT OPTIONS
@@ -747,7 +747,7 @@ void ai_logger (enum ggml_log_level level, const char *text, void *user_data) {
     // printf("%s %s\n", type, text);
     
     const char *values[] = {type, text};
-    int types[] = {SQLITE_TEXT, SQLITE_TEXT};
+    int types[] = {(type == NULL) ? SQLITE_NULL : SQLITE_TEXT, SQLITE_TEXT};
     int lens[] = {-1, -1};
     sqlite_db_write(NULL, ai->db, LOG_TABLE_INSERT_STMT, values, types, lens, 2);
 }

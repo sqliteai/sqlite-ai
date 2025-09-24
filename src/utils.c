@@ -289,16 +289,19 @@ bool sqlite_sanity_function (sqlite3_context *context, const char *func_name, in
 }
 
 int sqlite_db_write (sqlite3_context *context, sqlite3 *db, const char *sql, const char **values, int types[], int lens[], int count) {
-    sqlite3_stmt *pstmt = NULL;
-    
     // compile sql
+    sqlite3_stmt *pstmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &pstmt, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
+    // ensure parameter count matches
+    int nparams = sqlite3_bind_parameter_count(pstmt);
+    if (nparams != count) {rc = SQLITE_MISMATCH; goto cleanup;}
+    
     // check bindings
     for (int i=0; i<count; ++i) {
-        // sanity check input
-        if ((types[i] != SQLITE_NULL) && (values[i] == NULL)) {
+        // treat NULL value as NULL binding
+        if (values[i] == NULL) {
             rc = sqlite3_bind_null(pstmt, i+1);
             continue;
         }
