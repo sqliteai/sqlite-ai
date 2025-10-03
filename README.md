@@ -65,83 +65,26 @@ sqlite3_close(db)
 
 ### Android Package
 
-You can [add this project as a dependency to your Android project](https://central.sonatype.com/artifact/ai.sqlite/ai).
+Add the [following](https://central.sonatype.com/artifact/ai.sqlite/ai) to your Gradle dependencies:
 
-**Groovy:**
 ```gradle
-repositories {
-    google()
-    mavenCentral()
-    maven { url 'https://jitpack.io' }
-}
-dependencies {
-    // ...
-    // Use requery's SQLite instead of Android's built-in SQLite to support loading custom extensions
-    implementation 'com.github.requery:sqlite-android:3.49.0'
-    // Both packages below are identical - use either one
-    implementation 'ai.sqlite:ai:0.7.55' // Maven Central
-    // implementation 'com.github.sqliteai:sqlite-ai:0.7.55' // JitPack (alternative)
-}
+implementation 'ai.sqlite:ai:0.7.55'
 ```
-
-**Kotlin:**
-```kotlin
-repositories {
-    google()
-    mavenCentral()
-    maven(url = "https://jitpack.io")
-}
-
-dependencies {
-    // ...
-
-    // Use requery's SQLite instead of Android's built-in SQLite to support loading custom extensions
-    implementation("com.github.requery:sqlite-android:3.49.0")
-    // Both packages below are identical - use either one
-    implementation("ai.sqlite:ai:0.7.55") // Maven Central
-    // implementation("com.github.sqliteai:sqlite-ai:0.7.55") // JitPack (alternative)
-}
-```
-
-After adding the package, you'll need to [enable extractNativeLibs](https://github.com/sqliteai/sqlite-extensions-guide/blob/18acfc56d6af8791928f3ac8df7dc0e6a9741dd4/examples/android/src/main/AndroidManifest.xml#L6).
 
 Here's an example of how to use the package:
 ```java
-import android.database.Cursor;
-import android.util.Log;
-import io.requery.android.database.sqlite.SQLiteCustomExtension;
-import io.requery.android.database.sqlite.SQLiteDatabase;
-import io.requery.android.database.sqlite.SQLiteDatabaseConfiguration;
-import java.util.Collections;
-
-...
-
-    private void aiExtension() {
-        try {
-            SQLiteCustomExtension aiExtension = new SQLiteCustomExtension(getApplicationInfo().nativeLibraryDir + "/ai", null);
-            SQLiteDatabaseConfiguration config = new SQLiteDatabaseConfiguration(
-                getCacheDir().getPath() + "/ai_test.db",
-                SQLiteDatabase.CREATE_IF_NECESSARY | SQLiteDatabase.OPEN_READWRITE,
-                Collections.emptyList(),
-                Collections.emptyList(),
-                Collections.singletonList(aiExtension)
-            );
-
-            SQLiteDatabase db = SQLiteDatabase.openDatabase(config, null, null);
-
-            Cursor cursor = db.rawQuery("SELECT ai_version()", null);
-            if (cursor.moveToFirst()) {
-                String version = cursor.getString(0);
-                Log.i("sqlite-ai", "ai_version(): " + version);
-            }
-            cursor.close();
-            db.close();
-
-        } catch (Exception e) {
-            Log.e("sqlite-ai", "Error: " + e.getMessage());
-        }
-    }
+SQLiteCustomExtension aiExtension = new SQLiteCustomExtension(getApplicationInfo().nativeLibraryDir + "/ai", null);
+SQLiteDatabaseConfiguration config = new SQLiteDatabaseConfiguration(
+    getCacheDir().getPath() + "/ai_test.db",
+    SQLiteDatabase.CREATE_IF_NECESSARY | SQLiteDatabase.OPEN_READWRITE,
+    Collections.emptyList(),
+    Collections.emptyList(),
+    Collections.singletonList(aiExtension)
+);
+SQLiteDatabase db = SQLiteDatabase.openDatabase(config, null, null);
 ```
+
+**Note:** Additional settings and configuration are required for a complete setup. For full implementation details, see the [complete Android example](https://github.com/sqliteai/sqlite-extensions-guide/blob/main/examples/android/README.md).
 
 ### Python Package
 
