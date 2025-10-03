@@ -244,7 +244,7 @@ jobs:
           VULKAN_SDK: "C:/msys64/mingw64"
 
       - name: unix build llama.cpp
-        if: matrix.os != 'windows-2022' && matrix.name != 'apple-xcframework' && steps.cache-llama.outputs.cache-hit != 'true'
+        if: matrix.os != 'windows-2022'&& matrix.name != 'android-aar' && matrix.name != 'apple-xcframework' && steps.cache-llama.outputs.cache-hit != 'true'
         run: ${{ contains(matrix.name, 'linux-musl') && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/llama.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build whisper.cpp 
@@ -255,7 +255,7 @@ jobs:
           VULKAN_SDK: "C:/msys64/mingw64"
 
       - name: unix build whisper.cpp
-        if: matrix.os != 'windows-2022' && matrix.name != 'apple-xcframework' && steps.cache-whisper.outputs.cache-hit != 'true'
+        if: matrix.os != 'windows-2022'&& matrix.name != 'android-aar' && matrix.name != 'apple-xcframework' && steps.cache-whisper.outputs.cache-hit != 'true'
         run: ${{ contains(matrix.name, 'linux-musl') && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/whisper.cpp.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build miniaudio 
@@ -264,7 +264,7 @@ jobs:
         run: make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: unix build miniaudio
-        if: matrix.os != 'windows-2022' && matrix.name != 'apple-xcframework' && steps.cache-miniaudio.outputs.cache-hit != 'true'
+        if: matrix.os != 'windows-2022'&& matrix.name != 'android-aar' && matrix.name != 'apple-xcframework' && steps.cache-miniaudio.outputs.cache-hit != 'true'
         run: ${{ contains(matrix.name, 'linux-musl') && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make build/miniaudio.stamp ${{ matrix.make && matrix.make || ''}}
 
       - name: windows build sqlite-ai
