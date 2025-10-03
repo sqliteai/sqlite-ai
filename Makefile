@@ -94,9 +94,12 @@ else ifeq ($(PLATFORM),android)
 	CXX = $(CC)++
 	TARGET := $(DIST_DIR)/ai.so
 	LDFLAGS += -static-libstdc++ -shared
-	ANDROID_OPTIONS = -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-	LLAMA_OPTIONS += $(ANDROID_OPTIONS) -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF
-	WHISPER_OPTIONS += $(ANDROID_OPTIONS) -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF
+	ANDROID_OPTIONS = -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF
+	ifneq (,$(filter $(ARCH),aarch64))
+		ANDROID_OPTIONS += -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod
+	endif
+	LLAMA_OPTIONS += $(ANDROID_OPTIONS)
+	WHISPER_OPTIONS += $(ANDROID_OPTIONS)
 	MINIAUDIO_OPTIONS += $(ANDROID_OPTIONS)
 	STRIP = $(BIN)/llvm-strip --strip-unneeded $@
 else ifeq ($(PLATFORM),ios)
@@ -303,6 +306,17 @@ $(DIST_DIR)/%.xcframework: $(LIB_NAMES)
 
 xcframework: $(DIST_DIR)/ai.xcframework
 
+AAR_ARM = packages/android/src/main/jniLibs/arm64-v8a/
+AAR_X86 = packages/android/src/main/jniLibs/x86_64/
+aar:
+	mkdir -p $(AAR_ARM) $(AAR_X86)
+	$(MAKE) clean && $(MAKE) PLATFORM=android ARCH=arm64-v8a
+	mv $(DIST_DIR)/ai.so $(AAR_ARM)
+	$(MAKE) clean && $(MAKE) PLATFORM=android ARCH=x86_64
+	mv $(DIST_DIR)/ai.so $(AAR_X86)
+	cd packages/android && ./gradlew clean assembleRelease
+	cp packages/android/build/outputs/aar/android-release.aar $(DIST_DIR)/ai.aar
+
 # Help message
 help:
 	@echo "SQLite AI Extension Makefile"
@@ -323,5 +337,6 @@ help:
 	@echo "  test			- Test the extension"
 	@echo "  help			- Display this help message"
 	@echo "  xcframework	- Build the Apple XCFramework"
+	@echo "  aar				- Build the Android AAR package"
 
-.PHONY: all clean test extension help version xcframework
+.PHONY: all clean test extension help version xcframework aar

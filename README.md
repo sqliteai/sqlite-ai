@@ -30,6 +30,16 @@ Download the appropriate pre-built binary for your platform from the official [R
 - Android
 - iOS
 
+### Loading the Extension
+
+```sql
+-- In SQLite CLI
+.load ./ai
+
+-- In SQL
+SELECT load_extension('./ai');
+```
+
 ### Swift Package
 
 You can [add this repository as a package dependency to your Swift project](https://developer.apple.com/documentation/xcode/adding-package-dependencies-to-your-app#Add-a-package-dependency). After adding the package, you'll need to set up SQLite with extension loading by following steps 4 and 5 of [this guide](https://github.com/sqliteai/sqlite-extensions-guide/blob/main/platforms/ios.md#4-set-up-sqlite-with-extension-loading).
@@ -53,6 +63,86 @@ log("ai_version(): \(String(cString: sqlite3_column_text(stmt, 0)))")
 sqlite3_close(db)
 ```
 
+### Android Package
+
+You can [add this project as a dependency to your Android project](https://central.sonatype.com/artifact/ai.sqlite/ai).
+
+**Groovy:**
+```gradle
+repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://jitpack.io' }
+}
+dependencies {
+    // ...
+    // Use requery's SQLite instead of Android's built-in SQLite to support loading custom extensions
+    implementation 'com.github.requery:sqlite-android:3.49.0'
+    // Both packages below are identical - use either one
+    implementation 'ai.sqlite:ai:0.7.55' // Maven Central
+    // implementation 'com.github.sqliteai:sqlite-ai:0.7.55' // JitPack (alternative)
+}
+```
+
+**Kotlin:**
+```kotlin
+repositories {
+    google()
+    mavenCentral()
+    maven(url = "https://jitpack.io")
+}
+
+dependencies {
+    // ...
+
+    // Use requery's SQLite instead of Android's built-in SQLite to support loading custom extensions
+    implementation("com.github.requery:sqlite-android:3.49.0")
+    // Both packages below are identical - use either one
+    implementation("ai.sqlite:ai:0.7.55") // Maven Central
+    // implementation("com.github.sqliteai:sqlite-ai:0.7.55") // JitPack (alternative)
+}
+```
+
+After adding the package, you'll need to [enable extractNativeLibs](https://github.com/sqliteai/sqlite-extensions-guide/blob/18acfc56d6af8791928f3ac8df7dc0e6a9741dd4/examples/android/src/main/AndroidManifest.xml#L6).
+
+Here's an example of how to use the package:
+```java
+import android.database.Cursor;
+import android.util.Log;
+import io.requery.android.database.sqlite.SQLiteCustomExtension;
+import io.requery.android.database.sqlite.SQLiteDatabase;
+import io.requery.android.database.sqlite.SQLiteDatabaseConfiguration;
+import java.util.Collections;
+
+...
+
+    private void aiExtension() {
+        try {
+            SQLiteCustomExtension aiExtension = new SQLiteCustomExtension(getApplicationInfo().nativeLibraryDir + "/ai", null);
+            SQLiteDatabaseConfiguration config = new SQLiteDatabaseConfiguration(
+                getCacheDir().getPath() + "/ai_test.db",
+                SQLiteDatabase.CREATE_IF_NECESSARY | SQLiteDatabase.OPEN_READWRITE,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.singletonList(aiExtension)
+            );
+
+            SQLiteDatabase db = SQLiteDatabase.openDatabase(config, null, null);
+
+            Cursor cursor = db.rawQuery("SELECT ai_version()", null);
+            if (cursor.moveToFirst()) {
+                String version = cursor.getString(0);
+                Log.i("sqlite-ai", "ai_version(): " + version);
+            }
+            cursor.close();
+            db.close();
+
+        } catch (Exception e) {
+            Log.e("sqlite-ai", "Error: " + e.getMessage());
+        }
+    }
+```
+
 ### Python Package
 
 Python developers can quickly get started using the ready-to-use `sqlite-ai` package available on PyPI:
@@ -62,16 +152,6 @@ pip install sqlite-ai
 ```
 
 For usage details and examples, see the [Python package documentation](./packages/python/README.md).
-
-### Loading the Extension
-
-```sql
--- In SQLite CLI
-.load ./ai
-
--- In SQL
-SELECT load_extension('./ai');
-```
 
 ## Getting Started
 
