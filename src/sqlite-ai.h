@@ -24,7 +24,7 @@
 extern "C" {
 #endif
 
-#define SQLITE_AI_VERSION "0.7.5"
+#define SQLITE_AI_VERSION "0.7.55"
 
 SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi);
 
