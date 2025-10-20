@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container && matrix.container || '' }}
-    name: ${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }} build${{ matrix.arch != 'arm64-v8a' && matrix.name != 'ios-sim' && matrix.name != 'ios' && matrix.name != 'apple-xcframework' && matrix.name != 'android-aar' && ' + test' || ''}}
+    name: ${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }} build${{ matrix.arch != 'arm64-v8a' && matrix.name != 'ios-sim' && matrix.name != 'ios' && matrix.name != 'apple-xcframework' && matrix.name != 'android-aar' && ( matrix.name != 'macos' || matrix.arch != 'x86_64' ) && ' + test' || ''}}
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -19,6 +19,14 @@ jobs:
           - os: macos-15
             name: macos
             make: LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+          - os: macos-15
+            arch: x86_64
+            name: macos
+            make: ARCH=x86_64 LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
+          - os: macos-15
+            arch: arm64
+            name: macos
+            make: ARCH=arm64 LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"
           - os: ubuntu-22.04
             arch: x86_64
             name: linux-cpu
@@ -363,7 +371,7 @@ jobs:
           VULKAN_SDK: "C:/msys64/mingw64"
 
       - name: unix test sqlite-ai
-        if: contains(matrix.name, 'linux') || matrix.name == 'macos'
+        if: contains(matrix.name, 'linux') || ( matrix.name == 'macos' && matrix.arch != 'x86_64' )
         run: ${{ contains(matrix.name, 'linux-musl') && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make test ${{ matrix.make && matrix.make || ''}}
 
       - uses: actions/upload-artifact@v4.6.2
@@ -465,9 +473,82 @@ jobs:
         if: steps.tag.outputs.version != ''
         run: cd packages/android && ./gradlew publishAggregationToCentralPortal -PSIGNING_KEY="${{ secrets.SIGNING_KEY }}" -PSIGNING_PASSWORD="${{ secrets.SIGNING_PASSWORD }}" -PSONATYPE_USERNAME="${{ secrets.MAVEN_CENTRAL_USERNAME }}" -PSONATYPE_PASSWORD="${{ secrets.MAVEN_CENTRAL_TOKEN }}" -PVERSION="${{ steps.tag.outputs.version }}" -PAAR_PATH="../../artifacts/ai-android-aar/ai.aar"
 
+      - uses: actions/setup-node@v4
+        if: steps.tag.outputs.version != ''
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: build and publish npm packages
+        if: steps.tag.outputs.version != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd packages/node
+
+          # Update version in package.json
+          echo "Updating versions to ${{ steps.tag.outputs.version }}..."
+
+          # Update package.json
+          jq --arg version "${{ steps.tag.outputs.version }}" \
+            '.version = $version | .optionalDependencies = (.optionalDependencies | with_entries(.value = $version))' \
+            package.json > package.tmp.json && mv package.tmp.json package.json
+
+          echo "✓ Updated package.json to version ${{ steps.tag.outputs.version }}"
+
+          # Generate platform packages
+          echo "Generating platform packages..."
+          node generate-platform-packages.js "${{ steps.tag.outputs.version }}" "../../artifacts" "./platform-packages"
+          echo "✓ Generated 7 platform packages"
+          ls -la platform-packages/
+
+          # Build main package
+          echo "Building main package..."
+          npm install
+          npm run build
+          npm test
+          echo "✓ Main package built and tested"
+
+          # Publish platform packages
+          echo "Publishing platform packages to npm..."
+          cd platform-packages
+          for platform_dir in */; do
+            platform_name=$(basename "$platform_dir")
+            echo "  Publishing @sqliteai/sqlite-ai-${platform_name}..."
+            cd "$platform_dir"
+            npm publish --access public
+            # TODO: Add --provenance flag after switching to OIDC (requires package to exist first)
+            cd ..
+            echo "  ✓ Published @sqliteai/sqlite-ai-${platform_name}"
+          done
+          cd ..
+
+          # Publish main package
+          echo "Publishing main package to npm..."
+          npm publish --access public
+          # TODO: Add --provenance flag after switching to OIDC (requires package to exist first)
+          echo "✓ Published @sqliteai/sqlite-ai@${{ steps.tag.outputs.version }}"
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ Successfully published 8 packages to npm"
+          echo "   Main: @sqliteai/sqlite-ai@${{ steps.tag.outputs.version }}"
+          echo "   Platform packages: 7"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
       - uses: softprops/action-gh-release@v2.2.1
         if: steps.tag.outputs.version != ''
         with:
+          body: |
+            # Packages
+
+            [**Node**](https://www.npmjs.com/package/@sqliteai/sqlite-ai): `npm install @sqliteai/sqlite-ai`
+            [**Android**](https://central.sonatype.com/artifact/ai.sqlite/ai): `ai.sqlite:ai:${{ steps.tag.outputs.version }}`
+            [**Python**](https://pypi.org/project/sqlite-ai): `pip install sqlite-ai`
+            [**Swift**](https://github.com/sqliteai/sqlite-ai#swift-package): [Installation Guide](https://github.com/sqliteai/sqlite-ai#swift-package)
+
+            ---
+
           generate_release_notes: true
           tag_name: ${{ steps.tag.outputs.version }}
           files: ai-*-${{ steps.tag.outputs.version }}.*

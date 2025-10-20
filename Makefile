@@ -72,11 +72,20 @@ ifeq ($(PLATFORM),windows)
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
 	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
-	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup
-	CFLAGS += -arch x86_64 -arch arm64
-	LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
-	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
-	MINIAUDIO_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+	ifndef ARCH
+		LDFLAGS += -arch x86_64 -arch arm64
+		CFLAGS += -arch x86_64 -arch arm64
+		LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+		WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+		MINIAUDIO_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+	else
+		LDFLAGS += -arch $(ARCH)
+		CFLAGS += -arch $(ARCH)
+		LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="$(ARCH)" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+		WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="$(ARCH)" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+		MINIAUDIO_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="$(ARCH)" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+	endif
+	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup -headerpad_max_install_names
 	STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),android)
 	ifndef ARCH # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
@@ -106,7 +115,7 @@ else ifeq ($(PLATFORM),ios)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=14.0
 	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
-	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Accelerate -framework Metal -framework Foundation -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework CoreFoundation -framework Security -ldl -lpthread -lm -dynamiclib $(SDK)
+	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Accelerate -framework Metal -framework Foundation -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework CoreFoundation -framework Security -ldl -lpthread -lm -dynamiclib $(SDK) -headerpad_max_install_names
 	CFLAGS += -arch arm64 -x objective-c $(SDK)
 	LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
 	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
@@ -116,7 +125,7 @@ else ifeq ($(PLATFORM),ios-sim)
 	TARGET := $(DIST_DIR)/ai.dylib
 	SDK := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -miphonesimulator-version-min=14.0
 	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
-	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Accelerate -framework Metal -framework Foundation -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework CoreFoundation -framework Security -ldl -lpthread -lm -dynamiclib $(SDK)
+	LDFLAGS += -arch x86_64 -arch arm64 -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Accelerate -framework Metal -framework Foundation -framework AVFoundation -framework AudioToolbox -framework CoreAudio -framework CoreFoundation -framework Security -ldl -lpthread -lm -dynamiclib $(SDK) -headerpad_max_install_names
 	CFLAGS += -arch x86_64 -arch arm64 -x objective-c $(SDK)
 	LLAMA_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
 	WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"

@@ -1,0 +1,72 @@
+{
+  "name": "@sqliteai/sqlite-ai",
+  "version": "0.7.56",
+  "description": "SQLite AI extension for Node.js - On-device inference, embedding generation, and model interaction directly into your database",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "npm run build",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit",
+    "generate-platforms": "node generate-platform-packages.js"
+  },
+  "keywords": [
+    "sqlite",
+    "ai",
+    "llama",
+    "whisper",
+    "machine-learning",
+    "llm",
+    "speech-recognition",
+    "embeddings",
+    "sqlite-extension"
+  ],
+  "author": "Gioele Cantoni (gioele@sqlitecloud.io)",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sqliteai/sqlite-ai.git",
+    "directory": "packages/node"
+  },
+  "homepage": "https://github.com/sqliteai/sqlite-ai#readme",
+  "bugs": {
+    "url": "https://github.com/sqliteai/sqlite-ai/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "optionalDependencies": {
+    "@sqliteai/sqlite-ai-darwin-arm64": "0.7.56",
+    "@sqliteai/sqlite-ai-darwin-x86_64": "0.7.56",
+    "@sqliteai/sqlite-ai-linux-arm64": "0.7.56",
+    "@sqliteai/sqlite-ai-linux-arm64-musl": "0.7.56",
+    "@sqliteai/sqlite-ai-linux-x86_64": "0.7.56",
+    "@sqliteai/sqlite-ai-linux-x86_64-musl": "0.7.56",
+    "@sqliteai/sqlite-ai-win32-x86_64": "0.7.56"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^3.2.4"
+  }
+}
