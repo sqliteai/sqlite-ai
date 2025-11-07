@@ -1476,6 +1476,11 @@ static void llm_text_generate (sqlite3_context *context, int argc, sqlite3_value
 // MARK: - Chat -
 
 static bool llm_chat_check_context (ai_context *ai) {
+    if (!ai || !ai->ctx) {
+        sqlite_common_set_error(ai ? ai->context : NULL, ai ? ai->vtab : NULL, SQLITE_MISUSE, "No context found. Please call llm_context_create() before llm_chat_create().");
+        return false;
+    }
+    
     // check sampler
     if (!ai->sampler) {
         llm_sampler_check(ai);
@@ -1862,6 +1867,8 @@ static void llm_chat_free (sqlite3_context *context, int argc, sqlite3_value **a
 }
 
 static void llm_chat_create (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (llm_check_context(context) == false) return;
+    
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     
     // clean-up old chat (if any)
