@@ -72,6 +72,7 @@ ifeq ($(PLATFORM),windows)
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
 	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
+	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-blas.a
 	ifndef ARCH
 		LDFLAGS += -arch x86_64 -arch arm64
 		CFLAGS += -arch x86_64 -arch arm64
@@ -85,7 +86,7 @@ else ifeq ($(PLATFORM),macos)
 		WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="$(ARCH)" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
 		MINIAUDIO_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="$(ARCH)" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
 	endif
-	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup -headerpad_max_install_names
+	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -lggml-blas -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup -headerpad_max_install_names
 	STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),android)
 	ifndef ARCH # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
