@@ -29,6 +29,10 @@ SRC_DIR = src
 DIST_DIR = dist
 VPATH = $(SRC_DIR)
 BUILD_DIR = build
+CTEST_BIN = $(BUILD_DIR)/tests/sqlite_ai_tests
+TEST_MODEL_DIR = tests/models/unsloth/gemma-3-270m-it-GGUF
+TEST_MODEL_FILE = $(TEST_MODEL_DIR)/gemma-3-270m-it-UD-IQ2_M.gguf
+TEST_MODEL_URL = https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-UD-IQ2_M.gguf
 LLAMA_DIR = modules/llama.cpp
 WHISPER_DIR = modules/whisper.cpp
 MINIAUDIO_DIR = modules/miniaudio
@@ -55,6 +59,16 @@ LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_GGML)/lib -L./$(BUILD_LLAM
 WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
 MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio -lminiaudio_channel_combiner_node -lminiaudio_channel_separator_node -lminiaudio_ltrim_node -lminiaudio_reverb_node -lminiaudio_vocoder_node
 LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
+SQLITE_TEST_LIBS = -lpthread -lm
+ifneq ($(PLATFORM),macos)
+	SQLITE_TEST_LIBS += -ldl
+endif
+ifneq ($(SQLITE3),sqlite3)
+SQLITE3_BINDIR := $(dir $(SQLITE3))
+SQLITE3_PREFIX := $(abspath $(SQLITE3_BINDIR)/..)
+SQLITE_TEST_LIBS += -L$(SQLITE3_PREFIX)/lib
+endif
+SQLITE_TEST_LIBS += -lsqlite3
 
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
@@ -210,8 +224,17 @@ endif
 $(BUILD_DIR)/%.o: %.c $(BUILD_DIR)/llama.cpp.stamp
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
 
-test: $(TARGET)
-	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
+$(CTEST_BIN): tests/c/unittest.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 -Wall -Wextra -I$(SRC_DIR) tests/c/unittest.c -o $@ $(SQLITE_TEST_LIBS)
+
+$(TEST_MODEL_FILE):
+	@mkdir -p $(TEST_MODEL_DIR)
+	curl -L --fail --retry 3 -o $@ $(TEST_MODEL_URL)
+
+test: $(TARGET) $(CTEST_BIN) $(TEST_MODEL_FILE)
+		$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
+		$(CTEST_BIN) --extension "$(TARGET)" --model "$(TEST_MODEL_FILE)"
 
 # Build submodules
 ifeq ($(PLATFORM),windows)
