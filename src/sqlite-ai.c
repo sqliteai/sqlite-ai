@@ -784,7 +784,7 @@ static bool llm_check_context (sqlite3_context *context) {
 
 // MARK: - Chat Messages -
 
-bool llm_messages_append (ai_messages *list, const char *role, const char *content, bool duplicate_content) {
+bool llm_messages_append (ai_messages *list, const char *role, const char *content) {
     if (list->count >= list->capacity) {
         size_t new_cap = list->capacity ? list->capacity * 2 : MIN_ALLOC_MESSAGES;
         llama_chat_message *new_items = sqlite3_realloc64(list->items, new_cap * sizeof(llama_chat_message));
@@ -796,7 +796,7 @@ bool llm_messages_append (ai_messages *list, const char *role, const char *conte
 
     bool duplicate_role = ((role != ROLE_USER) && (role != ROLE_ASSISTANT));
     list->items[list->count].role = (duplicate_role) ? sqlite_strdup(role) : role;
-    list->items[list->count].content = (duplicate_content) ? sqlite_strdup(content) : content;
+    list->items[list->count].content = sqlite_strdup(content);
     list->count += 1;
     return true;
 }
@@ -1512,7 +1512,7 @@ static bool llm_chat_save_response (ai_context *ai, ai_messages *messages, const
     char *response = ai->chat.response.data;
     if (!response) return false;
     
-    if (!llm_messages_append(messages, ROLE_ASSISTANT, response, false)) {
+    if (!llm_messages_append(messages, ROLE_ASSISTANT, response)) {
         sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to append response");
         return false;
     }
@@ -1643,7 +1643,7 @@ static bool llm_chat_run (ai_context *ai, ai_cursor *c, const char *user_prompt)
     buffer_t *formatted = &ai->chat.formatted;
     
     // save prompt input in history
-    if (!llm_messages_append(messages, ROLE_USER, user_prompt, true)) {
+    if (!llm_messages_append(messages, ROLE_USER, user_prompt)) {
         sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to append message");
         return false;
     }
@@ -1979,7 +1979,7 @@ static void llm_chat_restore (sqlite3_context *context, int argc, sqlite3_value 
         const char *role = (const char *)sqlite3_column_text(vm, 0);
         const char *content = (const char *)sqlite3_column_text(vm, 1);
         
-        if (!llm_messages_append(messages, role, content, true)) {
+        if (!llm_messages_append(messages, role, content)) {
             sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to append response");
             rc = SQLITE_OK;
             goto abort_restore;
