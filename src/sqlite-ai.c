@@ -1490,6 +1490,9 @@ static bool llm_chat_check_context (ai_context *ai) {
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_dist((uint32_t)LLAMA_DEFAULT_SEED));
     }
     
+    // initialize the chat struct if already created
+    if (ai->chat.uuid[0] != '\0') return true;
+    
     // create history structs
     ai_uuid_v7_string(ai->chat.uuid, true);
     
