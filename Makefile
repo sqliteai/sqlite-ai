@@ -37,6 +37,15 @@ BUILD_LLAMA = $(BUILD_DIR)/llama.cpp
 BUILD_WHISPER = $(BUILD_DIR)/whisper.cpp
 BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
 
+# Test 
+# gemma-3-270m-it-UD-IQ2_M.gguf is just a lightweight model to use for testing
+CTEST_BIN = $(BUILD_DIR)/tests/sqlite_ai_tests
+GGUF_MODEL_DIR ?= tests/models/unsloth/gemma-3-270m-it-GGUF
+GGUF_MODEL_NAME ?= gemma-3-270m-it-UD-IQ2_M.gguf
+GGUF_MODEL_URL ?= https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-UD-IQ2_M.gguf
+GGUF_MODEL_PATH := $(GGUF_MODEL_DIR)/$(GGUF_MODEL_NAME)
+SKIP_UNITTEST ?= 0
+
 # Compiler and flags
 CC = gcc
 CXX = g++
@@ -55,6 +64,14 @@ LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_GGML)/lib -L./$(BUILD_LLAM
 WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
 MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio -lminiaudio_channel_combiner_node -lminiaudio_channel_separator_node -lminiaudio_ltrim_node -lminiaudio_reverb_node -lminiaudio_vocoder_node
 LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
+SQLITE_TEST_LIBS =
+ifneq ($(PLATFORM),windows)
+	SQLITE_TEST_LIBS += -lpthread -lm
+	ifneq ($(PLATFORM),macos)
+		SQLITE_TEST_LIBS += -ldl
+	endif
+endif
+SQLITE_TEST_SRC = tests/c/sqlite3.c
 
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
@@ -210,8 +227,27 @@ endif
 $(BUILD_DIR)/%.o: %.c $(BUILD_DIR)/llama.cpp.stamp
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
 
-test: $(TARGET)
-	$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
+$(CTEST_BIN): tests/c/unittest.c $(SQLITE_TEST_SRC)
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 -Wall -Wextra -DSQLITE_ENABLE_LOAD_EXTENSION -I$(SRC_DIR) tests/c/unittest.c $(SQLITE_TEST_SRC) -o $@ $(SQLITE_TEST_LIBS)
+
+$(GGUF_MODEL_PATH):
+	@mkdir -p $(GGUF_MODEL_DIR)
+	curl -L --fail --retry 3 -o $@ $(GGUF_MODEL_URL)
+
+TEST_DEPS := $(TARGET)
+ifeq ($(SKIP_UNITTEST),0)
+TEST_DEPS += $(CTEST_BIN) $(GGUF_MODEL_PATH)
+endif
+
+test: $(TEST_DEPS)
+		@echo "Running sqlite3 CLI smoke test (ensures .load works)..."
+		$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
+ifeq ($(SKIP_UNITTEST),0)
+		$(CTEST_BIN) --extension "$(TARGET)" --model "$(GGUF_MODEL_PATH)"
+else
+		@echo "Skipping C unit tests (SKIP_UNITTEST=$(SKIP_UNITTEST))."
+endif
 
 # Build submodules
 ifeq ($(PLATFORM),windows)

@@ -784,7 +784,7 @@ static bool llm_check_context (sqlite3_context *context) {
 
 // MARK: - Chat Messages -
 
-bool llm_messages_append (ai_messages *list, const char *role, const char *content, bool duplicate_content) {
+bool llm_messages_append (ai_messages *list, const char *role, const char *content) {
     if (list->count >= list->capacity) {
         size_t new_cap = list->capacity ? list->capacity * 2 : MIN_ALLOC_MESSAGES;
         llama_chat_message *new_items = sqlite3_realloc64(list->items, new_cap * sizeof(llama_chat_message));
@@ -796,7 +796,7 @@ bool llm_messages_append (ai_messages *list, const char *role, const char *conte
 
     bool duplicate_role = ((role != ROLE_USER) && (role != ROLE_ASSISTANT));
     list->items[list->count].role = (duplicate_role) ? sqlite_strdup(role) : role;
-    list->items[list->count].content = (duplicate_content) ? sqlite_strdup(content) : content;
+    list->items[list->count].content = sqlite_strdup(content);
     list->count += 1;
     return true;
 }
@@ -1490,6 +1490,9 @@ static bool llm_chat_check_context (ai_context *ai) {
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_dist((uint32_t)LLAMA_DEFAULT_SEED));
     }
     
+    // initialize the chat struct if already created
+    if (ai->chat.uuid[0] != '\0') return true;
+    
     // create history structs
     ai_uuid_v7_string(ai->chat.uuid, true);
     
@@ -1509,7 +1512,7 @@ static bool llm_chat_save_response (ai_context *ai, ai_messages *messages, const
     char *response = ai->chat.response.data;
     if (!response) return false;
     
-    if (!llm_messages_append(messages, ROLE_ASSISTANT, response, false)) {
+    if (!llm_messages_append(messages, ROLE_ASSISTANT, response)) {
         sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to append response");
         return false;
     }
@@ -1640,7 +1643,7 @@ static bool llm_chat_run (ai_context *ai, ai_cursor *c, const char *user_prompt)
     buffer_t *formatted = &ai->chat.formatted;
     
     // save prompt input in history
-    if (!llm_messages_append(messages, ROLE_USER, user_prompt, true)) {
+    if (!llm_messages_append(messages, ROLE_USER, user_prompt)) {
         sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to append message");
         return false;
     }
@@ -1976,7 +1979,7 @@ static void llm_chat_restore (sqlite3_context *context, int argc, sqlite3_value 
         const char *role = (const char *)sqlite3_column_text(vm, 0);
         const char *content = (const char *)sqlite3_column_text(vm, 1);
         
-        if (!llm_messages_append(messages, role, content, true)) {
+        if (!llm_messages_append(messages, role, content)) {
             sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to append response");
             rc = SQLITE_OK;
             goto abort_restore;
@@ -2369,6 +2372,27 @@ static void llm_context_create_textgen (sqlite3_context *context, int argc, sqli
     llm_context_create_with_options(context, ai, options, options2);
 }
 
+static void llm_context_size (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (!ai->ctx) {
+        sqlite_context_result_error(context, SQLITE_MISUSE, "No context found. Please call llm_context_create() before using this function.");
+        return;
+    }
+    uint32_t n_ctx = llama_n_ctx(ai->ctx);
+    sqlite3_result_int(context, n_ctx);
+}
+
+static void llm_context_used (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (!ai->ctx) {
+        sqlite_context_result_error(context, SQLITE_MISUSE, "No context found. Please call llm_context_create() before using this function.");
+        return;
+    }
+    int32_t n_ctx_used = llama_memory_seq_pos_max(llama_get_memory(ai->ctx), 0) + 1;
+    if (n_ctx_used < 0) n_ctx_used = 0;
+    sqlite3_result_int(context, n_ctx_used);
+}
+
 static void llm_model_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     ai_cleanup((void *)ai, true, false);
@@ -2705,6 +2729,12 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_context_create", 1, SQLITE_UTF8, ctx, llm_context_create, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_context_size", 0, SQLITE_UTF8, ctx, llm_context_size, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_context_used", 0, SQLITE_UTF8, ctx, llm_context_used, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_context_create_embedding", 0, SQLITE_UTF8, ctx, llm_context_create_embedding, NULL, NULL);
