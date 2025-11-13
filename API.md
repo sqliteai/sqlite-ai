@@ -246,6 +246,35 @@ SELECT llm_context_free();
 ```
 
 ---
+## `llm_context_size()`
+
+**Returns:** `INTEGER`
+
+**Description**:
+Returns the total token capacity (context window) of the current llama context. Use this after `llm_context_create` to confirm the configured `context_size`. Raises an error if no context is active.
+
+```sql
+SELECT llm_context_size();
+-- 4096
+```
+
+---
+
+## `llm_context_used()`
+
+**Returns:** `INTEGER`
+
+**Description:**
+Returns how many tokens of the current llama context have already been consumed. Combine this with `llm_context_size()` to monitor usage. Raises an error if no context is active.
+
+**Example:**
+
+```sql
+SELECT llm_context_used();
+-- 1024
+```
+
+---
 
 ## `llm_sampler_create()`
 
@@ -542,6 +571,22 @@ Applies repetition, frequency, and presence penalties.
 
 ```sql
 SELECT llm_sampler_init_penalties(64, 1.2, 0.5, 0.8);
+```
+
+---
+
+## `llm_token_count(text TEXT)`
+
+**Returns:** `INTEGER`
+
+**Description:**
+Returns how many tokens the current model would consume for the supplied `text`, using the active context’s vocabulary. Requires a context created via `llm_context_create`.
+
+**Example:**
+
+```sql
+SELECT llm_token_count('Hello world!');
+-- 5
 ```
 
 ---

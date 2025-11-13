@@ -2351,27 +2351,6 @@ static void llm_context_create (sqlite3_context *context, int argc, sqlite3_valu
     llm_context_create_with_options(context, ai, options, NULL);
 }
 
-static void llm_context_size (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (!ai->ctx) {
-        sqlite_context_result_error(context, SQLITE_MISUSE, "No context found. Please call llm_context_create() before using this function.");
-        return;
-    }
-    uint32_t n_ctx = llama_n_ctx(ai->ctx);
-    sqlite3_result_int(context, n_ctx);
-}
-
-static void llm_context_used (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (!ai->ctx) {
-        sqlite_context_result_error(context, SQLITE_MISUSE, "No context found. Please call llm_context_create() before using this function.");
-        return;
-    }
-    int32_t n_ctx_used = llama_memory_seq_pos_max(llama_get_memory(ai->ctx), 0) + 1;
-    if (n_ctx_used < 0) n_ctx_used = 0;
-    sqlite3_result_int(context, n_ctx_used);
-}
-
 static void llm_context_create_embedding (sqlite3_context *context, int argc, sqlite3_value **argv) {
     const char *options = AI_DEFAULT_CONTEXT_EMBEDDING_OPTIONS;
     const char *options2 = (argc > 0) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
@@ -2391,6 +2370,27 @@ static void llm_context_create_textgen (sqlite3_context *context, int argc, sqli
     const char *options2 = (argc > 0) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     llm_context_create_with_options(context, ai, options, options2);
+}
+
+static void llm_context_size (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (!ai->ctx) {
+        sqlite_context_result_error(context, SQLITE_MISUSE, "No context found. Please call llm_context_create() before using this function.");
+        return;
+    }
+    uint32_t n_ctx = llama_n_ctx(ai->ctx);
+    sqlite3_result_int(context, n_ctx);
+}
+
+static void llm_context_used (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (!ai->ctx) {
+        sqlite_context_result_error(context, SQLITE_MISUSE, "No context found. Please call llm_context_create() before using this function.");
+        return;
+    }
+    int32_t n_ctx_used = llama_memory_seq_pos_max(llama_get_memory(ai->ctx), 0) + 1;
+    if (n_ctx_used < 0) n_ctx_used = 0;
+    sqlite3_result_int(context, n_ctx_used);
 }
 
 static void llm_model_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
