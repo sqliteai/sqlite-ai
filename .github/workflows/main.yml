@@ -16,6 +16,7 @@ jobs:
   download-model:
     outputs:
       cache-key: gguf-${{ steps.meta.outputs.hash }}
+      model-path: ${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}
     name: Download GGUF model
     runs-on: ubuntu-22.04
     steps:
@@ -151,11 +152,11 @@ jobs:
       - name: Restore GGUF cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}
+          path: ${{ needs.download-model.outputs.model-path }}
           key: ${{ needs.download-model.outputs.cache-key }}
 
       - name: Verify GGUF model
-        run: test -f "${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}"
+        run: test -f "${{ needs.download-model.outputs.model-path }}"
 
       - name: android setup java
         if: matrix.name == 'android-aar'
