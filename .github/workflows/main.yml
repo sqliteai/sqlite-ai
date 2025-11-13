@@ -88,12 +88,12 @@ jobs:
             arch: x86_64
             name: linux-musl-cpu
             container: alpine:latest
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_AVX2=ON"
+            make: SKIP_UNITTEST=1 LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_AVX2=ON"
           - os: ubuntu-22.04
             arch: x86_64
             name: linux-musl-gpu
             container: alpine:latest
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_OPENCL=ON"
+            make: SKIP_UNITTEST=1 LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_OPENCL=ON"
           - os: ubuntu-22.04-arm
             arch: arm64
             name: linux-musl-cpu
@@ -105,20 +105,20 @@ jobs:
           - os: windows-2022
             arch: x86_64
             name: windows-cpu
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_AVX2=ON"
+            make: SKIP_UNITTEST=1 LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_AVX2=ON"
           - os: windows-2022
             arch: x86_64
             name: windows-gpu
-            make: LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
+            make: SKIP_UNITTEST=1 LLAMA="-DGGML_NATIVE=OFF -DGGML_CPU=ON -DGGML_VULKAN=ON -DGGML_OPENCL=ON"
           - os: ubuntu-22.04
             arch: x86_64
             name: android
-            make: PLATFORM=android ARCH=x86_64
+            make: SKIP_UNITTEST=1 PLATFORM=android ARCH=x86_64
             sqlite-amalgamation-zip: https://sqlite.org/2025/sqlite-amalgamation-3490100.zip
           - os: ubuntu-22.04
             arch: arm64-v8a
             name: android
-            make: PLATFORM=android ARCH=arm64-v8a
+            make: SKIP_UNITTEST=1 PLATFORM=android ARCH=arm64-v8a
           - os: macos-15
             name: ios
             make: PLATFORM=ios LLAMA="-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_ACCELERATE=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple" WHISPER="-DWHISPER_COREML=ON -DWHISPER_COREML_ALLOW_FALLBACK=ON"

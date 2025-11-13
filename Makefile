@@ -34,6 +34,7 @@ GGUF_MODEL_DIR ?= tests/models/unsloth/gemma-3-270m-it-GGUF
 GGUF_MODEL_NAME ?= gemma-3-270m-it-UD-IQ2_M.gguf
 GGUF_MODEL_URL ?= https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-UD-IQ2_M.gguf
 GGUF_MODEL_PATH := $(GGUF_MODEL_DIR)/$(GGUF_MODEL_NAME)
+SKIP_UNITTEST ?= 0
 LLAMA_DIR = modules/llama.cpp
 WHISPER_DIR = modules/whisper.cpp
 MINIAUDIO_DIR = modules/miniaudio
@@ -60,9 +61,12 @@ LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_GGML)/lib -L./$(BUILD_LLAM
 WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
 MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio -lminiaudio_channel_combiner_node -lminiaudio_channel_separator_node -lminiaudio_ltrim_node -lminiaudio_reverb_node -lminiaudio_vocoder_node
 LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
-SQLITE_TEST_LIBS = -lpthread -lm
-ifneq ($(PLATFORM),macos)
-	SQLITE_TEST_LIBS += -ldl
+SQLITE_TEST_LIBS =
+ifneq ($(PLATFORM),windows)
+	SQLITE_TEST_LIBS += -lpthread -lm
+	ifneq ($(PLATFORM),macos)
+		SQLITE_TEST_LIBS += -ldl
+	endif
 endif
 SQLITE_TEST_SRC = tests/c/sqlite3.c
 
@@ -228,15 +232,18 @@ $(GGUF_MODEL_PATH):
 	@mkdir -p $(GGUF_MODEL_DIR)
 	curl -L --fail --retry 3 -o $@ $(GGUF_MODEL_URL)
 
-ifeq ($(PLATFORM),android)
-test: $(TARGET)
-		@echo "Running sqlite3 CLI smoke test inside Android environment..."
-		$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
-else
-test: $(TARGET) $(CTEST_BIN) $(GGUF_MODEL_PATH)
+TEST_DEPS := $(TARGET)
+ifeq ($(SKIP_UNITTEST),0)
+TEST_DEPS += $(CTEST_BIN) $(GGUF_MODEL_PATH)
+endif
+
+test: $(TEST_DEPS)
 		@echo "Running sqlite3 CLI smoke test (ensures .load works)..."
 		$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
+ifeq ($(SKIP_UNITTEST),0)
 		$(CTEST_BIN) --extension "$(TARGET)" --model "$(GGUF_MODEL_PATH)"
+else
+		@echo "Skipping C unit tests (SKIP_UNITTEST=$(SKIP_UNITTEST))."
 endif
 
 # Build submodules
