@@ -30,9 +30,10 @@ DIST_DIR = dist
 VPATH = $(SRC_DIR)
 BUILD_DIR = build
 CTEST_BIN = $(BUILD_DIR)/tests/sqlite_ai_tests
-TEST_MODEL_DIR = tests/models/unsloth/gemma-3-270m-it-GGUF
-TEST_MODEL_FILE = $(TEST_MODEL_DIR)/gemma-3-270m-it-UD-IQ2_M.gguf
-TEST_MODEL_URL = https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-UD-IQ2_M.gguf
+GGUF_MODEL_DIR ?= tests/models/unsloth/gemma-3-270m-it-GGUF
+GGUF_MODEL_NAME ?= gemma-3-270m-it-UD-IQ2_M.gguf
+GGUF_MODEL_URL ?= https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-UD-IQ2_M.gguf
+GGUF_MODEL_PATH := $(GGUF_MODEL_DIR)/$(GGUF_MODEL_NAME)
 LLAMA_DIR = modules/llama.cpp
 WHISPER_DIR = modules/whisper.cpp
 MINIAUDIO_DIR = modules/miniaudio
@@ -63,12 +64,7 @@ SQLITE_TEST_LIBS = -lpthread -lm
 ifneq ($(PLATFORM),macos)
 	SQLITE_TEST_LIBS += -ldl
 endif
-ifneq ($(SQLITE3),sqlite3)
-SQLITE3_BINDIR := $(dir $(SQLITE3))
-SQLITE3_PREFIX := $(abspath $(SQLITE3_BINDIR)/..)
-SQLITE_TEST_LIBS += -L$(SQLITE3_PREFIX)/lib
-endif
-SQLITE_TEST_LIBS += -lsqlite3
+SQLITE_TEST_SRC = tests/c/sqlite3.c
 
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
@@ -224,17 +220,18 @@ endif
 $(BUILD_DIR)/%.o: %.c $(BUILD_DIR)/llama.cpp.stamp
 	$(CC) $(CFLAGS) -O3 -fPIC -c $< -o $@
 
-$(CTEST_BIN): tests/c/unittest.c
+$(CTEST_BIN): tests/c/unittest.c $(SQLITE_TEST_SRC)
 	@mkdir -p $(dir $@)
-	$(CC) -std=c11 -Wall -Wextra -I$(SRC_DIR) tests/c/unittest.c -o $@ $(SQLITE_TEST_LIBS)
+	$(CC) -std=c11 -Wall -Wextra -DSQLITE_ENABLE_LOAD_EXTENSION -I$(SRC_DIR) tests/c/unittest.c $(SQLITE_TEST_SRC) -o $@ $(SQLITE_TEST_LIBS)
 
-$(TEST_MODEL_FILE):
-	@mkdir -p $(TEST_MODEL_DIR)
-	curl -L --fail --retry 3 -o $@ $(TEST_MODEL_URL)
+$(GGUF_MODEL_PATH):
+	@mkdir -p $(GGUF_MODEL_DIR)
+	curl -L --fail --retry 3 -o $@ $(GGUF_MODEL_URL)
 
-test: $(TARGET) $(CTEST_BIN) $(TEST_MODEL_FILE)
+test: $(TARGET) $(CTEST_BIN) $(GGUF_MODEL_PATH)
+		@echo "Running sqlite3 CLI smoke test (ensures .load works)..."
 		$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
-		$(CTEST_BIN) --extension "$(TARGET)" --model "$(TEST_MODEL_FILE)"
+		$(CTEST_BIN) --extension "$(TARGET)" --model "$(GGUF_MODEL_PATH)"
 
 # Build submodules
 ifeq ($(PLATFORM),windows)
