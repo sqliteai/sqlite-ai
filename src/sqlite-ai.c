@@ -2351,27 +2351,25 @@ static void llm_context_create (sqlite3_context *context, int argc, sqlite3_valu
     llm_context_create_with_options(context, ai, options, NULL);
 }
 
-static void llm_context_usage (sqlite3_context *context, int argc, sqlite3_value **argv) {
+static void llm_context_size (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     if (!ai->ctx) {
         sqlite_context_result_error(context, SQLITE_MISUSE, "No context found. Please call llm_context_create() before using this function.");
         return;
     }
     uint32_t n_ctx = llama_n_ctx(ai->ctx);
-    int32_t n_ctx_used = llama_memory_seq_pos_max(llama_get_memory(ai->ctx), 0) + 1;
-    if (n_ctx_used < 0) n_ctx_used = 0;
-    double usage = (n_ctx == 0) ? 0.0 : ((double)(n_ctx_used) / (double)n_ctx);
-    char buffer[256];
-    int len = snprintf(buffer, sizeof(buffer),
-                       "{\"context_size\":%u,\"tokens_used\":%d,\"usage\":%.6f}",
-                       n_ctx,
-                       n_ctx_used,
-                       usage);
-    if (len < 0 || len >= (int)sizeof(buffer)) {
-        sqlite_context_result_error(context, SQLITE_ERROR, "Failed to format context usage");
+    sqlite3_result_int(context, n_ctx);
+}
+
+static void llm_context_used (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (!ai->ctx) {
+        sqlite_context_result_error(context, SQLITE_MISUSE, "No context found. Please call llm_context_create() before using this function.");
         return;
     }
-    sqlite3_result_text(context, buffer, len, SQLITE_TRANSIENT);
+    int32_t n_ctx_used = llama_memory_seq_pos_max(llama_get_memory(ai->ctx), 0) + 1;
+    if (n_ctx_used < 0) n_ctx_used = 0;
+    sqlite3_result_int(context, n_ctx_used);
 }
 
 static void llm_context_create_embedding (sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -2733,7 +2731,10 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     rc = sqlite3_create_function(db, "llm_context_create", 1, SQLITE_UTF8, ctx, llm_context_create, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
-    rc = sqlite3_create_function(db, "llm_context_usage", 0, SQLITE_UTF8, ctx, llm_context_usage, NULL, NULL);
+    rc = sqlite3_create_function(db, "llm_context_size", 0, SQLITE_UTF8, ctx, llm_context_size, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+    
+    rc = sqlite3_create_function(db, "llm_context_used", 0, SQLITE_UTF8, ctx, llm_context_used, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_context_create_embedding", 0, SQLITE_UTF8, ctx, llm_context_create_embedding, NULL, NULL);
