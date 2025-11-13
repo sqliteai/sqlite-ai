@@ -29,12 +29,6 @@ SRC_DIR = src
 DIST_DIR = dist
 VPATH = $(SRC_DIR)
 BUILD_DIR = build
-CTEST_BIN = $(BUILD_DIR)/tests/sqlite_ai_tests
-GGUF_MODEL_DIR ?= tests/models/unsloth/gemma-3-270m-it-GGUF
-GGUF_MODEL_NAME ?= gemma-3-270m-it-UD-IQ2_M.gguf
-GGUF_MODEL_URL ?= https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-UD-IQ2_M.gguf
-GGUF_MODEL_PATH := $(GGUF_MODEL_DIR)/$(GGUF_MODEL_NAME)
-SKIP_UNITTEST ?= 0
 LLAMA_DIR = modules/llama.cpp
 WHISPER_DIR = modules/whisper.cpp
 MINIAUDIO_DIR = modules/miniaudio
@@ -42,6 +36,15 @@ BUILD_GGML = $(BUILD_DIR)/ggml
 BUILD_LLAMA = $(BUILD_DIR)/llama.cpp
 BUILD_WHISPER = $(BUILD_DIR)/whisper.cpp
 BUILD_MINIAUDIO = $(BUILD_DIR)/miniaudio
+
+# Test 
+# gemma-3-270m-it-UD-IQ2_M.gguf is just a lightweight model to use for testing
+CTEST_BIN = $(BUILD_DIR)/tests/sqlite_ai_tests
+GGUF_MODEL_DIR ?= tests/models/unsloth/gemma-3-270m-it-GGUF
+GGUF_MODEL_NAME ?= gemma-3-270m-it-UD-IQ2_M.gguf
+GGUF_MODEL_URL ?= https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-UD-IQ2_M.gguf
+GGUF_MODEL_PATH := $(GGUF_MODEL_DIR)/$(GGUF_MODEL_NAME)
+SKIP_UNITTEST ?= 0
 
 # Compiler and flags
 CC = gcc

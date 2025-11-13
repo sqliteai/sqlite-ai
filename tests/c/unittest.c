@@ -9,6 +9,7 @@
 #include "sqlite-ai.h"
 #endif
 
+// Just a lightweight model to use for testing
 #define DEFAULT_MODEL_PATH "tests/models/unsloth/gemma-3-270m-it-GGUF/gemma-3-270m-it-UD-IQ2_M.gguf"
 
 typedef struct {
