@@ -228,10 +228,16 @@ $(GGUF_MODEL_PATH):
 	@mkdir -p $(GGUF_MODEL_DIR)
 	curl -L --fail --retry 3 -o $@ $(GGUF_MODEL_URL)
 
+ifeq ($(PLATFORM),android)
+test: $(TARGET)
+		@echo "Running sqlite3 CLI smoke test inside Android environment..."
+		$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
+else
 test: $(TARGET) $(CTEST_BIN) $(GGUF_MODEL_PATH)
 		@echo "Running sqlite3 CLI smoke test (ensures .load works)..."
 		$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
 		$(CTEST_BIN) --extension "$(TARGET)" --model "$(GGUF_MODEL_PATH)"
+endif
 
 # Build submodules
 ifeq ($(PLATFORM),windows)
