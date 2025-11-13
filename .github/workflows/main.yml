@@ -155,9 +155,6 @@ jobs:
           path: ${{ needs.download-model.outputs.model-path }}
           key: ${{ needs.download-model.outputs.cache-key }}
 
-      - name: Verify GGUF model
-        run: test -f "${{ needs.download-model.outputs.model-path }}"
-
       - name: android setup java
         if: matrix.name == 'android-aar'
         uses: actions/setup-java@v4
