@@ -152,6 +152,7 @@ typedef struct {
         const char              *template;
         const struct llama_vocab*vocab;
         
+        char                    *system_prompt;
         ai_messages             messages;
         buffer_t                formatted;
         buffer_t                response;
@@ -199,6 +200,7 @@ typedef enum {
     AI_MODEL_CHAT_TEMPLATE
 } ai_model_setting;
 
+const char *ROLE_SYSTEM    = "system";
 const char *ROLE_USER       = "user";
 const char *ROLE_ASSISTANT  = "assistant";
 
@@ -794,7 +796,7 @@ bool llm_messages_append (ai_messages *list, const char *role, const char *conte
         list->capacity = new_cap;
     }
 
-    bool duplicate_role = ((role != ROLE_USER) && (role != ROLE_ASSISTANT));
+    bool duplicate_role = ((role != ROLE_SYSTEM) && (role != ROLE_USER) && (role != ROLE_ASSISTANT));
     list->items[list->count].role = (duplicate_role) ? sqlite_strdup(role) : role;
     list->items[list->count].content = sqlite_strdup(content);
     list->count += 1;
@@ -1489,7 +1491,7 @@ static bool llm_chat_check_context (ai_context *ai) {
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_temp(0.8));
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_dist((uint32_t)LLAMA_DEFAULT_SEED));
     }
-    
+        
     // initialize the chat struct if already created
     if (ai->chat.uuid[0] != '\0') return true;
     
@@ -1647,10 +1649,30 @@ static bool llm_chat_run (ai_context *ai, ai_cursor *c, const char *user_prompt)
         sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to append message");
         return false;
     }
+
+    // add system prompt if available, models expect it to be the first message
+    llama_chat_message *new_items = messages->items;
+    if (ai->chat.system_prompt) {
+        size_t n = messages->count + (ai->chat.system_prompt ? 1 : 0);
+        llama_chat_message *new_items = sqlite3_realloc64(messages->items, n * sizeof(llama_chat_message));
+        if (!new_items)
+        return false;
+        
+        messages->items = new_items;
+        messages->capacity = n;
+        
+        int idx = 0;
+        new_items[0].role = ROLE_SYSTEM;
+        new_items[0].content = ai->chat.system_prompt;
+        idx = 1;    
+        for (size_t i = 0; i < messages->count; ++i) {
+            new_items[idx++] = messages->items[i];
+        }
+    }
     
     // transform a list of messages (the context) into
     // <|user|>What is AI?<|end|><|assistant|>AI stands for Artificial Intelligence...<|end|><|user|>Can you give an example?<|end|><|assistant|>...
-    int32_t new_len = llama_chat_apply_template(template, messages->items, messages->count, true, formatted->data, formatted->capacity);
+    int32_t new_len = llama_chat_apply_template(template, new_items, messages->count, true, formatted->data, formatted->capacity);
     if (new_len > formatted->capacity) {
         if (buffer_resize(formatted, new_len * 2) == false) return false;
         new_len = llama_chat_apply_template(template, messages->items, messages->count, true, formatted->data, formatted->capacity);
@@ -2013,6 +2035,27 @@ static void llm_chat_respond (sqlite3_context *context, int argc, sqlite3_value 
     buffer_reset(&ai->chat.formatted);
     buffer_reset(&ai->chat.response);
     llm_chat_run(ai, NULL, user_prompt);
+}
+
+static void llm_chat_system_prompt(sqlite3_context *context, int argc, sqlite3_value **argv)
+{
+    if (llm_check_context(context) == false)
+        return;
+
+    int types[] = {SQLITE_TEXT};
+    if (sqlite_sanity_function(context, "llm_chat_system_prompt", argc, argv, 1, types, true, false) == false)
+        return;
+
+    const char *system_prompt = (const char *)sqlite3_value_text(argv[0]);
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+
+    if (llm_chat_check_context(ai) == false)
+        return;
+
+    if (ai->chat.system_prompt) {
+        sqlite3_free(ai->chat.system_prompt);
+    }
+    ai->chat.system_prompt = sqlite3_mprintf("%s", system_prompt);
 }
 
 // MARK: - LLM Sampler -
@@ -2852,7 +2895,10 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_chat_respond", 1, SQLITE_UTF8, ctx, llm_chat_respond, NULL, NULL);
-    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_chat_system_prompt", 1, SQLITE_UTF8, ctx, llm_chat_system_prompt, NULL, NULL);
+    if (rc != SQLITE_OK)
+        goto cleanup;
     
     rc = sqlite3_create_module(db, "llm_chat", &llm_chat, ctx);
     if (rc != SQLITE_OK) goto cleanup;
