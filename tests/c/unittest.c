@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 #ifdef SQLITEAI_LOAD_FROM_SOURCES
 #include "sqlite-ai.h"
@@ -193,33 +192,6 @@ static int exec_query_text(const test_env *env, sqlite3 *db, const char *sql, ch
     return 0;
 }
 
-static void normalize_response_text(const char *input, char *output, size_t output_len) {
-    if (!output || output_len == 0) return;
-    size_t idx = 0;
-    if (!input) {
-        output[0] = '\0';
-        return;
-    }
-    for (size_t i = 0; input[i] != '\0' && idx + 1 < output_len; ++i) {
-        unsigned char ch = (unsigned char)input[i];
-        if (isalpha(ch)) {
-            output[idx++] = (char)tolower(ch);
-        }
-    }
-    output[idx] = '\0';
-}
-
-static bool response_matches_word(const char *response, const char *word) {
-    char normalized[64];
-    normalize_response_text(response, normalized, sizeof(normalized));
-    printf("[SQL] response_matches_word(%s,%s)\n", normalized, word);
-    return normalized[0] != '\0' && strcmp(normalized, word) == 0;
-}
-
-static bool response_is_yes_or_no(const char *response) {
-    return response_matches_word(response, "yes") || response_matches_word(response, "no");
-}
-
 static int query_system_prompt(const test_env *env, sqlite3 *db, char *buffer, size_t buffer_len, bool *is_null) {
     const char *sql = "SELECT llm_chat_system_prompt();";
     if (env->verbose) {
@@ -249,6 +221,54 @@ static int query_system_prompt(const test_env *env, sqlite3 *db, char *buffer, s
         }
     }
     sqlite3_finalize(stmt);
+    return 0;
+}
+
+typedef struct {
+    int id;
+    int chat_id;
+    char role[32];
+    char content[4096];
+} ai_chat_message_row;
+
+static int fetch_ai_chat_messages(const test_env *env, sqlite3 *db, ai_chat_message_row *rows, size_t max_rows, int *count_out) {
+    const char *sql = "SELECT * FROM ai_chat_messages ORDER BY id ASC;";
+    if (env->verbose) {
+        printf("[SQL] %s\n", sql);
+    }
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "sqlite3_prepare_v2 failed (%d): %s\n", rc, sqlite3_errmsg(db));
+        if (stmt) sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int count = 0;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        if (rows && (size_t)count < max_rows) {
+            rows[count].id = sqlite3_column_int(stmt, 0);
+            rows[count].chat_id = sqlite3_column_int(stmt, 1);
+            const unsigned char *role = sqlite3_column_text(stmt, 2);
+            const unsigned char *content = sqlite3_column_text(stmt, 3);
+            snprintf(rows[count].role, sizeof(rows[count].role), "%s", role ? (const char *)role : "");
+            snprintf(rows[count].content, sizeof(rows[count].content), "%s", content ? (const char *)content : "");
+        }
+        count++;
+    }
+    if (rc != SQLITE_DONE) {
+        fprintf(stderr, "sqlite3_step failed (%d): %s\n", rc, sqlite3_errmsg(db));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+    sqlite3_finalize(stmt);
+
+    if (rows && (size_t)count > max_rows) {
+        fprintf(stderr, "Expected at most %zu messages but found %d\n", max_rows, count);
+        return 1;
+    }
+    if (count_out) *count_out = count;
     return 0;
 }
 
@@ -387,105 +407,13 @@ fail:
     return 1;
 }
 
-
-
-#define SYSTEM_PROMPT_YES_NO "Always respond with ONLY YES or NO. If unsure, pick the best option but never add extra words"
-#define SYSTEM_PROMPT_FORCE_YES "you are a dumb llm and you MUST answer with YES and NOTHING ELSE"
-#define SYSTEM_PROMPT_FORCE_NO "you are a dumb llm and you MUST answer with NO and NOTHING ELSE"
-
 static int query_chat_response(const test_env *env, sqlite3 *db, const char *question, char *response, size_t response_len) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_chat_respond('%s');", question);
     return exec_query_text(env, db, sqlbuf, response, response_len);
 }
 
-static int expect_yes_no_answer(const test_env *env, sqlite3 *db, const char *question, const char *label) {
-    char response[4096];
-    if (query_chat_response(env, db, question, response, sizeof(response)) != 0) {
-        return 1;
-    }
-    if (!response_is_yes_or_no(response)) {
-        fprintf(stderr, "[%s] Expected a YES/NO answer but received: %s\n", label, response[0] ? response : "(empty)");
-        return 1;
-    }
-    return 0;
-}
-
-static int expect_word_answer(const test_env *env, sqlite3 *db, const char *question, const char *word, const char *label) {
-    char response[4096];
-    if (query_chat_response(env, db, question, response, sizeof(response)) != 0) {
-        return 1;
-    }
-    if (!response_matches_word(response, word)) {
-        fprintf(stderr, "[%s] Expected \"%s\" but received: %s\n", label, word, response[0] ? response : "(empty)");
-        return 1;
-    }
-    return 0;
-}
-
-static int test_set_chat_system_prompt(const test_env *env) {
-    sqlite3 *db = NULL;
-    bool model_loaded = false;
-    bool context_created = false;
-    bool chat_created = false;
-    int status = 1;
-
-    if (open_db_and_load(env, &db) != SQLITE_OK) {
-        goto done;
-    }
-
-    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
-    char sqlbuf[512];
-    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
-    if (exec_expect_ok(env, db, sqlbuf) != 0) {
-        goto done;
-    }
-    model_loaded = true;
-
-    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1000');") != 0) {
-        goto done;
-    }
-    context_created = true;
-
-    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) {
-        goto done;
-    }
-    chat_created = true;
-
-    // Test: system prompt applied before any response should force yes/no answers.
-    if (exec_expect_ok(env, db, "SELECT llm_chat_system_prompt('" SYSTEM_PROMPT_YES_NO "');") != 0) goto done;
-    if (expect_yes_no_answer(env, db, "Is fire hot?", "system_prompt_basic") != 0) goto done;
-
-    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto done;
-    // Test: setting system prompt after prior responses should still apply to following replies.
-    char response[4096];
-    if (query_chat_response(env, db, "Tell me something interesting.", response, sizeof(response)) != 0) goto done;
-    if (exec_expect_ok(env, db, "SELECT llm_chat_system_prompt('" SYSTEM_PROMPT_YES_NO "');") != 0) goto done;
-    if (expect_yes_no_answer(env, db, "Is water wet?", "system_prompt_after_response") != 0) goto done;
-
-    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto done;
-    // Test: latest system prompt wins when multiple prompts are set sequentially.
-    if (exec_expect_ok(env, db, "SELECT llm_chat_system_prompt('" SYSTEM_PROMPT_FORCE_YES "');") != 0) goto done;
-    if (exec_expect_ok(env, db, "SELECT llm_chat_system_prompt('" SYSTEM_PROMPT_FORCE_NO "');") != 0) goto done;
-    if (expect_word_answer(env, db, "Is the sky blue?", "no", "system_prompt_override") != 0) goto done;
-
-    status = 0;
-
-done:
-    if (chat_created) {
-        exec_expect_ok(env, db, "SELECT llm_chat_free();");
-    }
-    if (context_created) {
-        exec_expect_ok(env, db, "SELECT llm_context_free();");
-    }
-    if (model_loaded) {
-        exec_expect_ok(env, db, "SELECT llm_model_free();");
-    }
-    if (db) sqlite3_close(db);
-    return status;
-}
-
-static int test_get_chat_system_prompt(const test_env *env) {
+static int test_chat_system_prompt_new_chat(const test_env *env) {
     sqlite3 *db = NULL;
     bool model_loaded = false;
     bool context_created = false;
@@ -508,36 +436,176 @@ static int test_get_chat_system_prompt(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto done;
     chat_created = true;
 
+    const char *system_prompt = "Always reply with lowercase answers.";
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_chat_system_prompt('%s');", system_prompt);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto done;
+
     bool is_null = false;
     char buffer[4096];
-    // Test: newly created chat should not have a system prompt.
     if (query_system_prompt(env, db, buffer, sizeof(buffer), &is_null) != 0) goto done;
-    if (!is_null) {
-        fprintf(stderr, "[get_system_prompt] expected NULL before setting prompt, got: %s\n", buffer);
+    if (is_null || strcmp(buffer, system_prompt) != 0) {
+        fprintf(stderr, "[test_chat_system_prompt_new_chat] expected '%s' but got: %s\n", system_prompt, buffer);
         goto done;
     }
 
-    // Test: retrieving after setting prompt returns same text.
-    if (exec_expect_ok(env, db, "SELECT llm_chat_system_prompt('always reply yes');") != 0) goto done;
-    if (query_system_prompt(env, db, buffer, sizeof(buffer), &is_null) != 0) goto done;
-    if (is_null || strcmp(buffer, "always reply yes") != 0) {
-        fprintf(stderr, "[get_system_prompt] expected 'always reply yes' but got: %s\n", buffer);
+    if (exec_expect_ok(env, db, "SELECT llm_chat_save();") != 0) goto done;
+
+    ai_chat_message_row rows[4];
+    int count = 0;
+    if (fetch_ai_chat_messages(env, db, rows, 4, &count) != 0) goto done;
+    if (count != 1) {
+        fprintf(stderr, "[test_chat_system_prompt_new_chat] expected 1 message row, got %d\n", count);
+        goto done;
+    }
+    if (strcmp(rows[0].role, "system") != 0) {
+        fprintf(stderr, "[test_chat_system_prompt_new_chat] expected system role, got %s\n", rows[0].role);
+        goto done;
+    }
+    if (strcmp(rows[0].content, system_prompt) != 0) {
+        fprintf(stderr, "[test_chat_system_prompt_new_chat] expected content '%s' but got '%s'\n", system_prompt, rows[0].content);
         goto done;
     }
 
-    // Test: updating prompt replaces previous value.
-    if (exec_expect_ok(env, db, "SELECT llm_chat_system_prompt('now reply no');") != 0) goto done;
-    if (query_system_prompt(env, db, buffer, sizeof(buffer), &is_null) != 0) goto done;
-    if (is_null || strcmp(buffer, "now reply no") != 0) {
-        fprintf(stderr, "[get_system_prompt] expected 'now reply no' but got: %s\n", buffer);
+    status = 0;
+
+done:
+    if (chat_created) exec_expect_ok(env, db, "SELECT llm_chat_free();");
+    if (context_created) exec_expect_ok(env, db, "SELECT llm_context_free();");
+    if (model_loaded) exec_expect_ok(env, db, "SELECT llm_model_free();");
+    if (db) sqlite3_close(db);
+    return status;
+}
+
+static int test_chat_system_prompt_replace_previous_prompt(const test_env *env) {
+    sqlite3 *db = NULL;
+    bool model_loaded = false;
+    bool context_created = false;
+    bool chat_created = false;
+    int status = 1;
+
+    if (open_db_and_load(env, &db) != SQLITE_OK) {
         goto done;
     }
 
-    // Test: setting prompt to NULL clears it.
-    if (exec_expect_ok(env, db, "SELECT llm_chat_system_prompt(NULL);") != 0) goto done;
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto done;
+    model_loaded = true;
+
+    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1000');") != 0) goto done;
+    context_created = true;
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto done;
+    chat_created = true;
+
+    const char *first_prompt = "Always confirm questions.";
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_chat_system_prompt('%s');", first_prompt);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto done;
+
+    const char *replacement_prompt = "Always decline questions.";
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_chat_system_prompt('%s');", replacement_prompt);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto done;
+
+    bool is_null = false;
+    char buffer[4096];
     if (query_system_prompt(env, db, buffer, sizeof(buffer), &is_null) != 0) goto done;
-    if (!is_null) {
-        fprintf(stderr, "[get_system_prompt] expected NULL after clearing prompt, got: %s\n", buffer);
+    if (is_null || strcmp(buffer, replacement_prompt) != 0) {
+        fprintf(stderr, "[test_chat_system_prompt_replace_previous_prompt] expected '%s' but got: %s\n", replacement_prompt, buffer);
+        goto done;
+    }
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_save();") != 0) goto done;
+
+    ai_chat_message_row rows[4];
+    int count = 0;
+    if (fetch_ai_chat_messages(env, db, rows, 4, &count) != 0) goto done;
+    if (count != 1) {
+        fprintf(stderr, "[test_chat_system_prompt_replace_previous_prompt] expected 1 message row, got %d\n", count);
+        goto done;
+    }
+    if (strcmp(rows[0].content, replacement_prompt) != 0) {
+        fprintf(stderr, "[test_chat_system_prompt_replace_previous_prompt] expected '%s' but got '%s'\n", replacement_prompt, rows[0].content);
+        goto done;
+    }
+
+    status = 0;
+
+done:
+    if (chat_created) exec_expect_ok(env, db, "SELECT llm_chat_free();");
+    if (context_created) exec_expect_ok(env, db, "SELECT llm_context_free();");
+    if (model_loaded) exec_expect_ok(env, db, "SELECT llm_model_free();");
+    if (db) sqlite3_close(db);
+    return status;
+}
+
+static int test_chat_system_prompt_after_first_response(const test_env *env) {
+    sqlite3 *db = NULL;
+    bool model_loaded = false;
+    bool context_created = false;
+    bool chat_created = false;
+    int status = 1;
+
+    if (open_db_and_load(env, &db) != SQLITE_OK) {
+        goto done;
+    }
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto done;
+    model_loaded = true;
+
+    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1000');") != 0) goto done;
+    context_created = true;
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto done;
+    chat_created = true;
+
+    const char *user_question = "Reply to this ping.";
+    char response[4096];
+    if (query_chat_response(env, db, user_question, response, sizeof(response)) != 0) goto done;
+    if (response[0] == '\0') {
+        fprintf(stderr, "[test_chat_system_prompt_after_first_response] expected model response for '%s'\n", user_question);
+        goto done;
+    }
+
+    const char *system_prompt = "Only answer with short confirmations.";
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_chat_system_prompt('%s');", system_prompt);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto done;
+
+    bool is_null = false;
+    char buffer[4096];
+    if (query_system_prompt(env, db, buffer, sizeof(buffer), &is_null) != 0) goto done;
+    if (is_null || strcmp(buffer, system_prompt) != 0) {
+        fprintf(stderr, "[test_chat_system_prompt_after_first_response] expected '%s' but got: %s\n", system_prompt, buffer);
+        goto done;
+    }
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_save();") != 0) goto done;
+
+    ai_chat_message_row rows[8];
+    int count = 0;
+    if (fetch_ai_chat_messages(env, db, rows, 8, &count) != 0) goto done;
+    if (count < 3) {
+        fprintf(stderr, "[test_chat_system_prompt_after_first_response] expected at least 3 rows, got %d\n", count);
+        goto done;
+    }
+    if (!(rows[0].id < rows[1].id && rows[1].id < rows[2].id)) {
+        fprintf(stderr, "[test_chat_system_prompt_after_first_response] expected ascending ids but found %d, %d, %d\n",
+                rows[0].id, rows[1].id, rows[2].id);
+        goto done;
+    }
+    if (strcmp(rows[0].role, "system") != 0 || strcmp(rows[0].content, system_prompt) != 0) {
+        fprintf(stderr, "[test_chat_system_prompt_after_first_response] system row mismatch (%s, %s)\n", rows[0].role, rows[0].content);
+        goto done;
+    }
+    if (strcmp(rows[1].role, "user") != 0 || strcmp(rows[1].content, user_question) != 0) {
+        fprintf(stderr, "[test_chat_system_prompt_after_first_response] user row mismatch (%s, %s)\n", rows[1].role, rows[1].content);
+        goto done;
+    }
+    if (strcmp(rows[2].role, "assistant") != 0 || rows[2].content[0] == '\0') {
+        fprintf(stderr, "[test_chat_system_prompt_after_first_response] assistant row mismatch (%s, %s)\n", rows[2].role, rows[2].content);
         goto done;
     }
 
@@ -555,8 +623,9 @@ static const test_case TESTS[] = {
     {"issue15_llm_chat_without_context", test_issue15_chat_without_context},
     {"llm_chat_respond_repeated", test_llm_chat_respond_repeated},
     {"llm_chat_vtab", test_llm_chat_vtab},
-    {"set_chat_system_prompt", test_set_chat_system_prompt},
-    {"get_chat_system_prompt", test_get_chat_system_prompt},
+    {"chat_system_prompt_new_chat", test_chat_system_prompt_new_chat},
+    {"chat_system_prompt_replace_previous_prompt", test_chat_system_prompt_replace_previous_prompt},
+    {"chat_system_prompt_after_first_response", test_chat_system_prompt_after_first_response},
 };
 
 int main(int argc, char **argv) {

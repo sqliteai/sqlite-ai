@@ -786,18 +786,27 @@ static bool llm_check_context (sqlite3_context *context) {
 // MARK: - Chat Messages -
 
 bool llm_messages_append (ai_messages *list, const char *role, const char *content) {
-    if (list->count >= list->capacity) {
+    if (role == ROLE_SYSTEM && list->count > 0) {
+        // only one system prompt allowed at the beginning
+        return false;
+    }
+
+    bool needs_system_message = (list->count == 0 && role != ROLE_SYSTEM);
+    size_t required = list->count + (needs_system_message ? 1 : 0);
+    if (required >= list->capacity) {
         size_t new_cap = list->capacity ? list->capacity * 2 : MIN_ALLOC_MESSAGES;
         llama_chat_message *new_items = sqlite3_realloc64(list->items, new_cap * sizeof(llama_chat_message));
         if (!new_items) return false;
-        
+
         list->items = new_items;
         list->capacity = new_cap;
     }
 
-    if (list->count != 0 && role == ROLE_SYSTEM) {
-        // only one system message allowed at the beginning
-        return false;
+    if (needs_system_message) {
+        // reserve first item for empty system prompt
+        list->items[list->count].role = ROLE_SYSTEM;
+        list->items[list->count].content = sqlite_strdup("");
+        list->count += 1;
     }
 
     bool duplicate_role = ((role != ROLE_SYSTEM) && (role != ROLE_USER) && (role != ROLE_ASSISTANT));
@@ -816,8 +825,8 @@ bool llm_messages_set (ai_messages *list, int pos, const char *role, const char 
 
     const char *message_role = message->role;
     if ((message_role != ROLE_SYSTEM) && (message_role != ROLE_USER) && (message_role != ROLE_ASSISTANT)) 
-        sqlite3_free(message_role);
-    sqlite3_free(message->content);
+        sqlite3_free((char *)message_role);
+    sqlite3_free((char *)message->content);
 
     message->role = (duplicate_role) ? sqlite_strdup(role) : role;
     message->content = sqlite_strdup(content);
