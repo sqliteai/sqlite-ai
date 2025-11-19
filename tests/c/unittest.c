@@ -859,6 +859,7 @@ done:
     if (context_created) exec_expect_ok(env, db, "SELECT llm_context_free();");
     if (model_loaded) exec_expect_ok(env, db, "SELECT llm_model_free();");
     if (db) sqlite3_close(db);
+    if (status == 0) status = assert_sqlite_memory_clean("llm_context_size_errors", env);
     return status;
 }
 
@@ -922,6 +923,7 @@ done:
     if (context_created) exec_expect_ok(env, db, "SELECT llm_context_free();");
     if (model_loaded) exec_expect_ok(env, db, "SELECT llm_model_free();");
     if (db) sqlite3_close(db);
+    if (status == 0) status = assert_sqlite_memory_clean("llm_context_size_errors", env);
     return status;
 }
 
@@ -1002,6 +1004,7 @@ done:
     if (context_created) exec_expect_ok(env, db, "SELECT llm_context_free();");
     if (model_loaded) exec_expect_ok(env, db, "SELECT llm_model_free();");
     if (db) sqlite3_close(db);
+    if (status == 0) status = assert_sqlite_memory_clean("llm_context_size_errors", env);
     return status;
 }
 
