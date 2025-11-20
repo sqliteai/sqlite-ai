@@ -1957,20 +1957,44 @@ static void llm_chat_save (sqlite3_context *context, int argc, sqlite3_value **a
     // start transaction
     sqlite_db_write_simple(context, db, "BEGIN;");
     
-    // save chat
-    const char *sql = "INSERT INTO ai_chat_history (uuid, title, metadata) VALUES (?, ?, ?);";
+    // save chat, the ON CONFLICT allows saving multiple times
+    const char *sql = "INSERT INTO ai_chat_history (uuid, title, metadata) VALUES (?, ?, ?) "
+                      "ON CONFLICT(uuid) DO UPDATE SET "
+                      "  title = excluded.title, "
+                      "  metadata = excluded.metadata, "
+                      "  created_at = CURRENT_TIMESTAMP;";
     const char *values[] = {ai->chat.uuid, title, meta};
     int types[] = {SQLITE_TEXT, SQLITE_TEXT, SQLITE_TEXT};
     int lens[] = {-1, -1, -1};
     
     int rc = sqlite_db_write(context, db, sql, values, types, lens, 3);
     if (rc != SQLITE_OK) goto abort_save;
-        
-    // loop to save messages (the context)
-    char rowid_s[256];
-    sqlite3_int64 rowid = sqlite3_last_insert_rowid(db);
-    snprintf(rowid_s, sizeof(rowid_s), "%lld", (long long)rowid);
     
+    // get the rowid, cannot use sqlite3_last_insert_rowid for the CONFLICT case
+    char rowid_s[256];
+    sqlite3_stmt *pstmt = NULL;
+    sql = "SELECT id FROM ai_chat_history WHERE uuid = ?;";
+    rc = sqlite3_prepare_v2(db, sql, -1, &pstmt, NULL);
+    if (rc != SQLITE_OK) goto abort_save;
+    rc = sqlite3_bind_text(pstmt, 1, ai->chat.uuid, -1, SQLITE_STATIC);
+    rc = sqlite3_step(pstmt);
+    if (rc != SQLITE_ROW) {
+        sqlite3_finalize(pstmt);
+        goto abort_save;
+    }
+    sqlite3_int64 rowid = sqlite3_column_int64(pstmt, 0);
+    sqlite3_finalize(pstmt);
+    snprintf(rowid_s, sizeof(rowid_s), "%lld", (long long)rowid);
+
+    // delete all messages for this chat id, if any
+    sql = "DELETE FROM ai_chat_messages WHERE chat_id = ?;";
+    const char *values3[] = {rowid_s};
+    int types3[] = {SQLITE_INTEGER};
+    int lens3[] = {-1};
+    rc = sqlite_db_write(context, db, sql, values3, types3, lens3, 1);
+    if (rc != SQLITE_OK) goto abort_save;
+    
+    // loop to save messages (the context)
     sql = "INSERT INTO ai_chat_messages (chat_id, role, content) VALUES (?, ?, ?);";
     int types2[] = {SQLITE_INTEGER, SQLITE_TEXT, SQLITE_TEXT};
     
