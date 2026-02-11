@@ -1,0 +1,83 @@
+name: publish flutter package
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    name: publish to pub.dev
+
+    steps:
+
+      - uses: actions/checkout@v4.2.2
+
+      - name: download release assets
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+          mkdir -p artifacts
+          cd artifacts
+
+          # Download all platform binaries from the GitHub release
+          gh release download "$VERSION" --pattern "ai-*.tar.gz"
+
+          # Extract all archives
+          for archive in ai-*.tar.gz; do
+            name=$(basename "$archive" "-$VERSION.tar.gz")
+            mkdir -p "$name"
+            tar -xzf "$archive" -C "$name"
+            rm "$archive"
+          done
+
+          ls -la
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: dart-lang/setup-dart@v1.7.1
+
+      - name: assemble and publish flutter package
+        run: |
+          FLUTTER_DIR=packages/flutter
+
+          # Android (only arm64 and x64, no arm)
+          mkdir -p $FLUTTER_DIR/native_libraries/android
+          cp artifacts/ai-android-arm64-v8a/ai.so  $FLUTTER_DIR/native_libraries/android/ai_android_arm64.so
+          cp artifacts/ai-android-x86_64/ai.so     $FLUTTER_DIR/native_libraries/android/ai_android_x64.so
+
+          # iOS device
+          mkdir -p $FLUTTER_DIR/native_libraries/ios
+          cp artifacts/ai-ios/ai.dylib $FLUTTER_DIR/native_libraries/ios/ai_ios_arm64.dylib
+
+          # iOS simulator (keep universal/fat binary as-is)
+          mkdir -p $FLUTTER_DIR/native_libraries/ios-sim
+          cp artifacts/ai-ios-sim/ai.dylib $FLUTTER_DIR/native_libraries/ios-sim/ai_ios-sim.dylib
+
+          # macOS (separate arch-specific dylibs)
+          mkdir -p $FLUTTER_DIR/native_libraries/mac
+          cp artifacts/ai-macos-arm64/ai.dylib $FLUTTER_DIR/native_libraries/mac/ai_mac_arm64.dylib
+          cp artifacts/ai-macos-x86_64/ai.dylib $FLUTTER_DIR/native_libraries/mac/ai_mac_x64.dylib
+
+          # Linux
+          mkdir -p $FLUTTER_DIR/native_libraries/linux
+          cp artifacts/ai-linux-cpu-x86_64/ai.so $FLUTTER_DIR/native_libraries/linux/ai_linux_x64.so
+          cp artifacts/ai-linux-cpu-arm64/ai.so  $FLUTTER_DIR/native_libraries/linux/ai_linux_arm64.so
+
+          # Windows
+          mkdir -p $FLUTTER_DIR/native_libraries/windows
+          cp artifacts/ai-windows-cpu-x86_64/ai.dll $FLUTTER_DIR/native_libraries/windows/ai_windows_x64.dll
+
+          # Update version
+          sed -i "s/^version: .*/version: $VERSION/" $FLUTTER_DIR/pubspec.yaml
+
+          # Publish to pub.dev
+          cd $FLUTTER_DIR
+          dart pub get
+          dart pub publish --dry-run
+          dart pub publish --force

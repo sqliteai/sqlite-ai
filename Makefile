@@ -119,7 +119,7 @@ else ifeq ($(PLATFORM),android)
 	CC = $(BIN)/$(ARCH)-linux-android26-clang
 	CXX = $(CC)++
 	TARGET := $(DIST_DIR)/ai.so
-	LDFLAGS += -static-libstdc++ -shared
+	LDFLAGS += -static-libstdc++ -shared -Wl,-z,max-page-size=16384
 	ANDROID_OPTIONS = -DCMAKE_TOOLCHAIN_FILE=$(ANDROID_NDK)/build/cmake/android.toolchain.cmake -DANDROID_ABI=$(if $(filter aarch64,$(ARCH)),arm64-v8a,$(ARCH)) -DANDROID_PLATFORM=android-26 -DCMAKE_C_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_CXX_FLAGS="-march=$(if $(filter aarch64,$(ARCH)),armv8.7a,x86-64)" -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF
 	ifneq (,$(filter $(ARCH),aarch64))
 		ANDROID_OPTIONS += -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod

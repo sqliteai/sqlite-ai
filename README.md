@@ -96,6 +96,27 @@ pip install sqlite-ai
 
 For usage details and examples, see the [Python package documentation](./packages/python/README.md).
 
+### Flutter Package
+
+Add the [sqlite_ai](https://pub.dev/packages/sqlite_ai) package to your project:
+
+```bash
+flutter pub add sqlite_ai  # Flutter projects
+dart pub add sqlite_ai     # Dart projects
+```
+
+Usage with `sqlite3` package:
+```dart
+import 'package:sqlite3/sqlite3.dart';
+import 'package:sqlite_ai/sqlite_ai.dart';
+
+sqlite3.loadSqliteAiExtension();
+final db = sqlite3.openInMemory();
+print(db.select('SELECT ai_version()'));
+```
+
+For a complete example, see the [Flutter example](https://github.com/sqliteai/sqlite-extensions-guide/blob/main/examples/flutter/README.md).
+
 ## Getting Started
 
 Here's a quick example to get started with SQLite Sync:

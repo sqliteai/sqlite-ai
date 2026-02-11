@@ -1,6 +1,10 @@
 name: Build, Test and Release
 on:
   push:
+    branches:
+      - '**'
+    tags-ignore:
+      - '**'
   workflow_dispatch:
 
 permissions:
@@ -526,12 +530,8 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.tag.outputs.version != ''
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-
-      - name: update npm
-        if: steps.tag.outputs.version != ''
-        run: npm install -g npm@11.5.1
 
       - name: build and publish npm packages
         if: steps.tag.outputs.version != ''
@@ -589,9 +589,11 @@ jobs:
       - uses: softprops/action-gh-release@v2.2.1
         if: steps.tag.outputs.version != ''
         with:
+          token: ${{ secrets.RELEASE_PAT }}
           body: |
             # Packages
 
+            [**Flutter/Dart**](https://pub.dev/packages/sqlite_ai): `flutter pub add sqlite_ai:${{ steps.tag.outputs.version }}` or `dart pub add sqlite_ai:${{ steps.tag.outputs.version }}`
             [**Node**](https://www.npmjs.com/package/@sqliteai/sqlite-ai): `npm install @sqliteai/sqlite-ai`
             [**Android**](https://central.sonatype.com/artifact/ai.sqlite/ai): `ai.sqlite:ai:${{ steps.tag.outputs.version }}`
             [**Python**](https://pypi.org/project/sqlite-ai): `pip install sqlite-ai`
