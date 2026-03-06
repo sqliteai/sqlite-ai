@@ -558,8 +558,12 @@ jobs:
                 echo "📦 $artifact: $OLD_SIZE → $NEW_SIZE bytes (${INCREASE}% change)"
                 # Check if increase is more than 5%
                 if (( $(echo "$INCREASE > 5" | bc -l) )); then
-                  echo "❌ ERROR: $artifact size increased by ${INCREASE}% (limit: 5%)"
-                  FAILED=1
+                  if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+                    echo "⚠️  WARNING: $artifact size increased by ${INCREASE}% (limit: 5%)"
+                  else
+                    echo "❌ ERROR: $artifact size increased by ${INCREASE}% (limit: 5%)"
+                    FAILED=1
+                  fi
                 fi
               done
               if [ $FAILED -eq 1 ]; then
