@@ -399,8 +399,12 @@ jobs:
           VULKAN_SDK: "C:/msys64/mingw64"
 
       - name: unix build sqlite-ai
-        if: matrix.os != 'windows-2022'
+        if: matrix.os != 'windows-2022' && matrix.name != 'android-aar' && matrix.name != 'apple-xcframework'
         run: ${{ contains(matrix.name, 'linux-musl') && matrix.arch == 'arm64' && 'docker exec alpine' || '' }} make extension ${{ matrix.make && matrix.make || ''}}
+
+      - name: build aar/xcframework
+        if: matrix.name == 'android-aar' || matrix.name == 'apple-xcframework'
+        run: make ${{ matrix.make && matrix.make || ''}}
 
       - name: create keychain for codesign
         if: matrix.os == 'macos-15'
