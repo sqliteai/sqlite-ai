@@ -25,15 +25,13 @@ sqlite3 myapp.db
 ```sql
 -- Load the extension
 .load ./ai
-
--- Load a GGUF model
-SELECT llm_model_load('./models/llama.gguf', 'gpu_layers=99');
 ```
 
 ### Text Generation
 
 ```sql
--- Create a text generation context
+-- Load a text generation model
+SELECT llm_model_load('./models/Qwen2.5-3B-Q4_K_M.gguf', 'gpu_layers=99');
 SELECT llm_context_create_textgen();
 
 -- Generate text
@@ -43,7 +41,8 @@ SELECT llm_text_generate('What is the most beautiful city in Italy?');
 ### Embedding Generation
 
 ```sql
--- Create an embedding context
+-- Load an embedding model
+SELECT llm_model_load('./models/nomic-embed-text-v1.5-Q8_0.gguf', 'gpu_layers=99');
 SELECT llm_context_create_embedding('embedding_type=FLOAT32');
 
 -- Generate an embedding vector
@@ -56,7 +55,8 @@ SELECT llm_embed_generate('Hello world', 'json_output=1');
 ### Chat
 
 ```sql
--- Create a chat context
+-- Load a chat model
+SELECT llm_model_load('./models/Llama-3.2-3B-Instruct-Q4_K_M.gguf', 'gpu_layers=99');
 SELECT llm_context_create_chat();
 
 -- Send a message and get a complete response
