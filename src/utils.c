@@ -100,10 +100,7 @@ bool buffer_append (buffer_t *b, const char *data, uint32_t len, bool zero_termi
 }
 
 void buffer_destroy (buffer_t *b) {
-    if (b->data) {
-        sqlite3_free(b->data);
-        b->data = NULL;
-    }
+    if (b->data) sqlite3_free(b->data);
     b->data = NULL;
     b->capacity = 0;
     b->length = 0;
@@ -428,30 +425,33 @@ char *ai_uuid_v7_string (char value[UUID_STR_MAXLEN], bool dash_format) {
 
 // MARK: - Audio -
 
-float *audio_wav_file2pcm (const char *wav_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels) {
-    return ma_dr_wav_open_file_and_read_pcm_frames_f32(wav_path, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *) num_samples, &mem_callbacks);
+float *audio_wav_file2pcm (const char *wav_path, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels) {
+    return ma_dr_wav_open_file_and_read_pcm_frames_f32(wav_path, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *)num_samples, &mem_callbacks);
 }
 
-float *audio_wav_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels) {
-    return ma_dr_wav_open_memory_and_read_pcm_frames_f32(data, data_size, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *) num_samples, &mem_callbacks);
+float *audio_wav_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels) {
+    return ma_dr_wav_open_memory_and_read_pcm_frames_f32(data, data_size, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *)num_samples, &mem_callbacks);
 }
 
-float *audio_flac_file2pcm (const char *flac_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels) {
-    return ma_dr_flac_open_file_and_read_pcm_frames_f32(flac_path, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *) num_samples, &mem_callbacks);
+float *audio_flac_file2pcm (const char *flac_path, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels) {
+    return ma_dr_flac_open_file_and_read_pcm_frames_f32(flac_path, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *)num_samples, &mem_callbacks);
 }
 
-float *audio_flac_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels) {
-    return ma_dr_flac_open_memory_and_read_pcm_frames_f32(data, data_size, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *) num_samples, &mem_callbacks);
+float *audio_flac_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels) {
+    return ma_dr_flac_open_memory_and_read_pcm_frames_f32(data, data_size, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *)num_samples, &mem_callbacks);
 }
 
-float *audio_mp3_file2pcm (const char *mp3_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels) {
-    return ma_dr_flac_open_file_and_read_pcm_frames_f32(mp3_path, (unsigned int *)channels, (unsigned int *)sample_rate, (ma_uint64 *) num_samples, &mem_callbacks);
+float *audio_mp3_file2pcm (const char *mp3_path, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels) {
+    ma_dr_mp3_config config = {0};
+    float *buffer = ma_dr_mp3_open_file_and_read_pcm_frames_f32(mp3_path, &config, (ma_uint64 *)num_samples, &mem_callbacks);
+    if (channels) *channels = (uint32_t)config.channels;
+    if (sample_rate) *sample_rate = (uint32_t)config.sampleRate;
+    return buffer;
 }
 
 float *audio_mp3_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels) {
     ma_dr_mp3_config config = {0};
-    
-    float *buffer = ma_dr_mp3_open_memory_and_read_pcm_frames_f32(data, data_size, &config, (ma_uint64 *) num_samples, &mem_callbacks);
+    float *buffer = ma_dr_mp3_open_memory_and_read_pcm_frames_f32(data, data_size, &config, (ma_uint64 *)num_samples, &mem_callbacks);
     if (channels) *channels = (uint32_t)config.channels;
     if (sample_rate) *sample_rate = (uint32_t)config.sampleRate;
     return buffer;

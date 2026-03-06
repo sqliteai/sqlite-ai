@@ -37,14 +37,14 @@ SQLITE_EXTENSION_INIT1
 #define DEBUG_AI(...)
 #endif
 
-#define NPREDICT_DEFAULT_VALUE                  128
 #define MIN_ALLOC_TOKEN                         4096
 #define MIN_ALLOC_PROMPT                        4096
 #define MIN_ALLOC_RESPONSE                      4096
 #define MAX_PATH                                4096
 #define MAX_TOKEN_TEXT_LEN                      128     // according to ChatGPT 32 would be safe for all common tokenizers
-#define MIN_ALLOC_MESSAGES                      256
+#define MIN_ALLOC_MESSAGES                      64
 #define MAX_LORAS                               64      // max 2 or 3 LoRa adapters are used (usually just one)
+#define KEY_MATCHES(k, klen, constant)          ((klen) == (int)strlen(constant) && strncasecmp((k), (constant), (klen)) == 0)
 
 #define LOG_TABLE_DECLARATION                   "CREATE TEMP TABLE IF NOT EXISTS ai_log (id INTEGER PRIMARY KEY, stamp DATETIME DEFAULT CURRENT_TIMESTAMP, type TEXT, message TEXT);"
 #define LOG_TABLE_INSERT_STMT                   "INSERT INTO ai_log (type, message) VALUES (?, ?);"
@@ -95,12 +95,28 @@ SQLITE_EXTENSION_INIT1
 #define OPTION_KEY_CHECK_TENSORS                "check_tensors"
 #define OPTION_KEY_LOG_INFO                     "log_info"
 
+// WHISPER OPTIONS
+#define OPTION_KEY_LANGUAGE                     "language"
+#define OPTION_KEY_TRANSLATE                    "translate"
+#define OPTION_KEY_OFFSET_MS                    "offset_ms"
+#define OPTION_KEY_DURATION_MS                  "duration_ms"
+#define OPTION_KEY_NO_TIMESTAMPS                "no_timestamps"
+#define OPTION_KEY_SINGLE_SEGMENT               "single_segment"
+#define OPTION_KEY_TOKEN_TIMESTAMPS             "token_timestamps"
+#define OPTION_KEY_INITIAL_PROMPT               "initial_prompt"
+#define OPTION_KEY_TEMPERATURE_W                "temperature"
+#define OPTION_KEY_BEAM_SIZE                    "beam_size"
+#define OPTION_KEY_AUDIO_CTX                    "audio_ctx"
+#define OPTION_KEY_SUPPRESS_REGEX               "suppress_regex"
+#define OPTION_KEY_MAX_LEN                      "max_len"
+#define OPTION_KEY_PRINT_TIMESTAMPS             "print_timestamps"
+
 #define AI_COLUMN_REPLY                         0
 
 #define AI_DEFAULT_MODEL_OPTIONS                "gpu_layers=99"
 #define AI_DEFAULT_CONTEXT_EMBEDDING_OPTIONS    "generate_embedding=1,normalize_embedding=1,pooling_type=mean"
-#define AI_DEFAULT_CONTEXT_CHAT_OPTIONS         "context_size=4096"
-#define AI_DEFAULT_CONTEXT_TEXTGEN_OPTIONS      "context_size=4096"
+#define AI_DEFAULT_CONTEXT_CHAT_OPTIONS         ""
+#define AI_DEFAULT_CONTEXT_TEXTGEN_OPTIONS      ""
 
 typedef enum {
     EMBEDDING_TYPE_F32 = 1,
@@ -202,6 +218,19 @@ typedef enum {
 const char *ROLE_SYSTEM    = "system";
 const char *ROLE_USER       = "user";
 const char *ROLE_ASSISTANT  = "assistant";
+
+// normalize a role string to its static pointer (avoids duplicating known roles)
+static const char *role_normalize (const char *role) {
+    if (!role) return NULL;
+    if (role == ROLE_SYSTEM || strcmp(role, ROLE_SYSTEM) == 0) return ROLE_SYSTEM;
+    if (role == ROLE_USER || strcmp(role, ROLE_USER) == 0) return ROLE_USER;
+    if (role == ROLE_ASSISTANT || strcmp(role, ROLE_ASSISTANT) == 0) return ROLE_ASSISTANT;
+    return NULL; // unknown role, caller must duplicate
+}
+
+static bool role_is_static (const char *role) {
+    return (role == ROLE_SYSTEM || role == ROLE_USER || role == ROLE_ASSISTANT);
+}
 
 void ai_logger (enum ggml_log_level level, const char *text, void *user_data);
 
@@ -350,49 +379,49 @@ static bool llm_model_options_callback (void *ctx, void *xdata, const char *key,
     memcpy(buffer, value, len);
     
     // MODEL OPTIONS
-    if (strncasecmp(key, OPTION_KEY_GPU_LAYERS, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_GPU_LAYERS)) {
         int value = (int)strtol(buffer, NULL, 0);
         options->n_gpu_layers = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_MAIN_GPU, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_MAIN_GPU)) {
         int value = (int)strtol(buffer, NULL, 0);
         options->main_gpu = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_SPLIT_MODE, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_SPLIT_MODE)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0 && value <= 2) options->split_mode = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_VOCAB_ONLY, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_VOCAB_ONLY)) {
         int value = (int)strtol(buffer, NULL, 0);
         options->vocab_only = (value != 0);
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_USE_MMAP, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_USE_MMAP)) {
         int value = (int)strtol(buffer, NULL, 0);
         options->use_mmap = (value != 0);
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_USE_MLOCK, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_USE_MLOCK)) {
         int value = (int)strtol(buffer, NULL, 0);
         options->use_mlock = (value != 0);
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_CHECK_TENSORS, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_CHECK_TENSORS)) {
         int value = (int)strtol(buffer, NULL, 0);
         options->check_tensors = (value != 0);
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_LOG_INFO, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_LOG_INFO)) {
         int value = (int)strtol(buffer, NULL, 0);
         ai->options.log_info = (value != 0);
         return true;
@@ -418,31 +447,31 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
     memcpy(buffer, value, len);
     
     // AI CONTEXT (OPTIONS can be NULL)
-    if (strncasecmp(key, OPTION_KEY_NORMALIZE_EMBEDDING, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_NORMALIZE_EMBEDDING)) {
         int value = (int)strtol(buffer, NULL, 0);
         ai->options.embedding.normalize = (value != 0);
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_JSON_OUTPUT, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_JSON_OUTPUT)) {
         int value = (int)strtol(buffer, NULL, 0);
         ai->options.embedding.json_output = (value != 0);
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_MAX_TOKENS, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_MAX_TOKENS)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) ai->options.max_tokens = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_N_PREDICT, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_N_PREDICT)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) ai->options.n_predict = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_EMBEDDING_TYPE, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_EMBEDDING_TYPE)) {
         int value = embedding_name_to_type(buffer);
         if (value > 0) ai->options.embedding.type = value;
         return true;
@@ -450,13 +479,13 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
     
     // CONTEXT OPTIONS
     if (options == NULL) {
-        char buffer[512];
-        snprintf(buffer, sizeof(buffer), "key %.*s ignored because context was already created", key_len, key);
-        ai_logger(GGML_LOG_LEVEL_WARN, buffer, ai);
+        char warn_buf[512];
+        snprintf(warn_buf, sizeof(warn_buf), "key %.*s ignored because context was already created", key_len, key);
+        ai_logger(GGML_LOG_LEVEL_WARN, warn_buf, ai);
         return true;
     }
-    
-    if (strncasecmp(key, OPTION_KEY_GENERATE_EMBEDDING, key_len) == 0) {
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_GENERATE_EMBEDDING)) {
         // https://github.com/ggml-org/llama.cpp/discussions/15093
         int value = (int)strtol(buffer, NULL, 0);
         options->embeddings = (value != 0);
@@ -468,7 +497,7 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_CONTEXT_SIZE, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_CONTEXT_SIZE)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) {
             options->n_ctx = value;
@@ -477,43 +506,43 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_N_CTX, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_N_CTX)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) options->n_ctx = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_N_BATCH, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_N_BATCH)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) options->n_batch = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_N_UBATCH, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_N_UBATCH)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) options->n_ubatch = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_N_SEQ_MAX, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_N_SEQ_MAX)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) options->n_seq_max = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_N_THREADS, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_N_THREADS)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) options->n_threads = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_N_THREADS_BATCH, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_N_THREADS_BATCH)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) options->n_threads_batch = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_POOLING_TYPE, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_POOLING_TYPE)) {
         // pooling_type mean is not supported and so in this version we forced it to be really mean so ONE EMBEDDING will be generated
         if (strcasecmp(buffer, "none") == 0) options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
         else if (strcasecmp(buffer, "unspecified") == 0) options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
@@ -524,14 +553,14 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_ATTENTION_TYPE, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_ATTENTION_TYPE)) {
         if (strcasecmp(buffer, "unspecified") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_UNSPECIFIED;
         else if (strcasecmp(buffer, "causal") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_CAUSAL;
         else if (strcasecmp(buffer, "non_causal") == 0) options->attention_type = LLAMA_ATTENTION_TYPE_NON_CAUSAL;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_ROPE_SCALING_TYPE, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_ROPE_SCALING_TYPE)) {
         if (strcasecmp(buffer, "unspecified") == 0) options->rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED;
         else if (strcasecmp(buffer, "none") == 0) options->rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_NONE;
         else if (strcasecmp(buffer, "linear") == 0) options->rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_LINEAR;
@@ -540,92 +569,92 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_FLASH_ATTN_TYPE, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_FLASH_ATTN_TYPE)) {
         if (strcasecmp(buffer, "auto") == 0) options->flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
         else if (strcasecmp(buffer, "disabled") == 0) options->flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
         else if (strcasecmp(buffer, "enabled") == 0) options->flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_ROPE_FREQ_BASE, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_ROPE_FREQ_BASE)) {
         float value = strtof(buffer, NULL);
         options->rope_freq_base = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_ROPE_FREQ_SCALE, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_ROPE_FREQ_SCALE)) {
         float value = strtof(buffer, NULL);
         options->rope_freq_scale = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_YARN_EXT_FACTOR, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_YARN_EXT_FACTOR)) {
         float value = strtof(buffer, NULL);
         options->yarn_ext_factor = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_YARN_ATTN_FACTOR, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_YARN_ATTN_FACTOR)) {
         float value = strtof(buffer, NULL);
         options->yarn_attn_factor = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_YARN_BETA_FAST, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_YARN_BETA_FAST)) {
         float value = strtof(buffer, NULL);
         options->yarn_beta_fast = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_YARN_BETA_SLOW, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_YARN_BETA_SLOW)) {
         float value = strtof(buffer, NULL);
         options->yarn_beta_slow = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_DEFRAG_THOLD, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_DEFRAG_THOLD)) {
         float value = strtof(buffer, NULL);
         options->defrag_thold = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_YARN_ORIG_CTX, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_YARN_ORIG_CTX)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) options->yarn_orig_ctx = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_OFFLOAD_KQV, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_OFFLOAD_KQV)) {
         int value = (int)strtol(buffer, NULL, 0);
         options->offload_kqv = (value != 0);
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_OP_OFFLOAD, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_OP_OFFLOAD)) {
         int value = (int)strtol(buffer, NULL, 0);
         options->op_offload = (value != 0);
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_SWA_FULL, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_SWA_FULL)) {
         int value = (int)strtol(buffer, NULL, 0);
         options->swa_full = (value != 0);
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_TYPE_K, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_TYPE_K)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) options->type_k = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_TYPE_V, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_TYPE_V)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) options->type_v = value;
         return true;
     }
     
-    if (strncasecmp(key, OPTION_KEY_TYPE_KV_UNIFIED, key_len) == 0) {
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_TYPE_KV_UNIFIED)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) options->kv_unified = (value != 0);
         return true;
@@ -668,8 +697,100 @@ static bool whisper_model_options_callback (void *ctx, void *xdata, const char *
 }
 
 static bool whisper_full_params_options_callback (void *ctx, void *xdata, const char *key, int key_len, const char *value, int value_len) {
-    //struct whisper_full_params *params = (struct whisper_full_params *)xdata;
-    //ai_context *ai = (ai_context *)ctx;
+    struct whisper_full_params *params = (struct whisper_full_params *)xdata;
+
+    // sanity check
+    if (!key || key_len == 0) return true;
+    if (!value || value_len == 0) return true;
+
+    // convert value to c-string
+    char buffer[256] = {0};
+    size_t len = (value_len > (int)sizeof(buffer)-1) ? (int)sizeof(buffer)-1 : value_len;
+    memcpy(buffer, value, len);
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_LANGUAGE)) {
+        // language is stored inside params as a pointer; must outlive the whisper_full() call
+        if (strcasecmp(buffer, "auto") == 0) params->language = NULL;
+        else params->language = sqlite_strdup(buffer);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_TRANSLATE)) {
+        params->translate = ((int)strtol(buffer, NULL, 0) != 0);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_N_THREADS)) {
+        int v = (int)strtol(buffer, NULL, 0);
+        if (v > 0) params->n_threads = v;
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_OFFSET_MS)) {
+        params->offset_ms = (int)strtol(buffer, NULL, 0);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_DURATION_MS)) {
+        params->duration_ms = (int)strtol(buffer, NULL, 0);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_NO_TIMESTAMPS)) {
+        params->no_timestamps = ((int)strtol(buffer, NULL, 0) != 0);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_SINGLE_SEGMENT)) {
+        params->single_segment = ((int)strtol(buffer, NULL, 0) != 0);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_TOKEN_TIMESTAMPS)) {
+        params->token_timestamps = ((int)strtol(buffer, NULL, 0) != 0);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_INITIAL_PROMPT)) {
+        params->initial_prompt = sqlite_strdup(buffer);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_TEMPERATURE_W)) {
+        params->temperature = strtof(buffer, NULL);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_BEAM_SIZE)) {
+        int v = (int)strtol(buffer, NULL, 0);
+        if (v > 0) {
+            params->strategy = WHISPER_SAMPLING_BEAM_SEARCH;
+            params->beam_search.beam_size = v;
+        }
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_AUDIO_CTX)) {
+        params->audio_ctx = (int)strtol(buffer, NULL, 0);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_SUPPRESS_REGEX)) {
+        params->suppress_regex = sqlite_strdup(buffer);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_MAX_LEN)) {
+        params->max_len = (int)strtol(buffer, NULL, 0);
+        return true;
+    }
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_PRINT_TIMESTAMPS)) {
+        params->print_timestamps = ((int)strtol(buffer, NULL, 0) != 0);
+        return true;
+    }
+
+    // ignore unknown keys
     return true;
 }
 
@@ -699,11 +820,11 @@ static void ai_free (void *ctx, bool free_ai, bool free_llm, bool free_audio) {
     if (free_llm) {
         memset(ai->lora, 0, sizeof(struct llama_adapter_lora *)*MAX_LORAS);
         memset(ai->lora_scale, 0, sizeof(float)*MAX_LORAS);
-        if (ai->ctx) llama_clear_adapter_lora(ai->ctx);
+        if (ai->ctx) llama_set_adapters_lora(ai->ctx, NULL, 0, NULL);
         if (ai->ctx) llama_free(ai->ctx);
         if (ai->model) llama_model_free(ai->model);
-        // important: do not free if the sampler has been added to a llama_sampler_chain (via llama_sampler_chain_add)
-        // if (ai->sampler) llama_sampler_free(ai->sampler);
+        // sampler chain is freed explicitly via llm_sampler_free() or llm_sampler_create() SQL functions;
+        // freeing it here causes a double-free crash when ai_destroy runs after explicit cleanup
         llm_options_init(&ai->options);
         
         ai->model = NULL;
@@ -786,15 +907,18 @@ static bool llm_check_context (sqlite3_context *context) {
 // MARK: - Chat Messages -
 
 bool llm_messages_append (ai_messages *list, const char *role, const char *content) {
-    if (role == ROLE_SYSTEM && list->count > 0) {
+    const char *normalized = role_normalize(role);
+
+    if (normalized == ROLE_SYSTEM && list->count > 0) {
         // only one system prompt allowed at the beginning
         return false;
     }
 
-    bool needs_system_message = (list->count == 0 && role != ROLE_SYSTEM);
-    size_t required = list->count + (needs_system_message ? 1 : 0);
-    if (required >= list->capacity) {
+    bool needs_system_message = (list->count == 0 && normalized != ROLE_SYSTEM);
+    size_t required = list->count + (needs_system_message ? 2 : 1);
+    if (required > list->capacity) {
         size_t new_cap = list->capacity ? list->capacity * 2 : MIN_ALLOC_MESSAGES;
+        if (new_cap < required) new_cap = required;
         llama_chat_message *new_items = sqlite3_realloc64(list->items, new_cap * sizeof(llama_chat_message));
         if (!new_items) return false;
 
@@ -809,37 +933,32 @@ bool llm_messages_append (ai_messages *list, const char *role, const char *conte
         list->count += 1;
     }
 
-    bool duplicate_role = ((role != ROLE_SYSTEM) && (role != ROLE_USER) && (role != ROLE_ASSISTANT));
-    list->items[list->count].role = (duplicate_role) ? sqlite_strdup(role) : role;
+    list->items[list->count].role = normalized ? normalized : sqlite_strdup(role);
     list->items[list->count].content = sqlite_strdup(content);
     list->count += 1;
     return true;
 }
 
 bool llm_messages_set (ai_messages *list, int pos, const char *role, const char *content) {
-    if (pos < 0 || pos >= list->count)
+    if (pos < 0 || pos >= (int)list->count)
         return false;
 
-    bool duplicate_role = ((role != ROLE_SYSTEM) && (role != ROLE_USER) && (role != ROLE_ASSISTANT));
+    const char *normalized = role_normalize(role);
     llama_chat_message *message = &list->items[pos];
 
-    const char *message_role = message->role;
-    if ((message_role != ROLE_SYSTEM) && (message_role != ROLE_USER) && (message_role != ROLE_ASSISTANT)) 
-        sqlite3_free((char *)message_role);
+    if (!role_is_static(message->role))
+        sqlite3_free((char *)message->role);
     sqlite3_free((char *)message->content);
 
-    message->role = (duplicate_role) ? sqlite_strdup(role) : role;
+    message->role = normalized ? normalized : sqlite_strdup(role);
     message->content = sqlite_strdup(content);
     return true;
 }
 
 void llm_messages_free (ai_messages *list) {
     for (size_t i = 0; i < list->count; ++i) {
-        // check if rule is static
-        const char *role = list->items[i].role;
-        bool role_tofree = ((role != ROLE_SYSTEM) && (role != ROLE_USER) && (role != ROLE_ASSISTANT));
-        if (role_tofree) sqlite3_free((char *)list->items[i].role);
-        // content is always to free
+        if (!role_is_static(list->items[i].role))
+            sqlite3_free((char *)list->items[i].role);
         sqlite3_free((char *)list->items[i].content);
     }
     sqlite3_free(list->items);
@@ -1071,22 +1190,6 @@ static int llm_embed_copy (const float *src, void *dest, embedding_type type, in
     return 0;
 }
 
-static void llm_batch_clear (struct llama_batch *batch) {
-    batch->n_tokens = 0;
-}
-
-static void llm_batch_add (struct llama_batch *batch, llama_token id, llama_pos pos, const llama_seq_id *seq_ids, size_t n_seq_ids, bool logits) {
-    batch->token   [batch->n_tokens] = id;
-    batch->pos     [batch->n_tokens] = pos;
-    batch->n_seq_id[batch->n_tokens] = (int32_t)n_seq_ids;
-    
-    for (size_t i = 0; i < n_seq_ids; ++i) {
-        batch->seq_id[batch->n_tokens][i] = seq_ids[i];
-    }
-    
-    batch->logits[batch->n_tokens] = logits ? 1 : 0;
-    batch->n_tokens++;
-}
 
 #if 0
 static void llm_embed_debug (const void *buf, embedding_type type, int n) {
@@ -1131,42 +1234,45 @@ static void llm_embed_debug (const void *buf, embedding_type type, int n) {
 static void llm_embed_generate_run (sqlite3_context *context, const char *text, int32_t text_len) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     struct llama_model *model = ai->model;
-    
-    // sanity check model
+
+    // sanity check model (encoder-decoder models are not supported for embeddings)
     if (llama_model_has_encoder(model) && llama_model_has_decoder(model)) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Computing embeddings in encoder-decoder models is not supported");
         return;
     }
-    
-    // sanity check model type (decode is used to create embeddings)
-    if (llama_model_has_decoder(model) == false) {
-        sqlite_context_result_error(context, SQLITE_ERROR, "Model does not support decoding (required for embedding)");
-        return;
-    }
-    
+
     // sanity check vocab
     const struct llama_vocab *vocab = llama_model_get_vocab(model);
     if (!vocab) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Failed to extract vocabulary from the model");
         return;
     }
-    
-    // pooling is NOT NONE -> one sentence-level embedding
-    // more details in notes/EMBEDDING.md
+
+    // determine model architecture
+    bool has_encoder = llama_model_has_encoder(model);
+    bool has_decoder = llama_model_has_decoder(model);
+    bool is_encoder_only = has_encoder && !has_decoder;
+
     struct llama_context *ctx = ai->ctx;
     llama_set_embeddings(ctx, true);
-    
-    // sanity check context / training window info (warn only)
+
+    // clamp effective context to model's training window to avoid position embedding overflow
+    // also clamp to n_batch since we submit all tokens in a single batch
     const int n_ctx_train = llama_model_n_ctx_train(model);
-    const int n_ctx = llama_n_ctx(ctx);
-    if (n_ctx > n_ctx_train) {
-        char buffer[512];
-        snprintf(buffer, sizeof(buffer), "Model was trained on only %d context tokens (%d specified)", n_ctx_train, n_ctx);
-        ai_logger(GGML_LOG_LEVEL_WARN, buffer, sqlite3_context_db_handle(context));
+    const int n_ctx_raw = (int)llama_n_ctx(ctx);
+    const int n_batch = (int)llama_n_batch(ctx);
+    int n_ctx = (n_ctx_raw > n_ctx_train) ? n_ctx_train : n_ctx_raw;
+    if (n_ctx > n_batch) n_ctx = n_batch;
+
+    // pooling type sanity check
+    const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
+    if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Embedding generation requires pooling (pooling_type must not be NONE)");
+        return;
     }
-    
+
     // allocate embedding buffer
-    int dimension = llama_model_n_embd(llama_get_model(ctx));
+    int dimension = llama_model_n_embd(model);
     embedding_type type = ai->options.embedding.type;
     int embedding_size = (int)embedding_type_to_size(type) * dimension;
     void *embedding = (void *)sqlite3_malloc64(embedding_size);
@@ -1174,122 +1280,122 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate embedding buffer of size %d", embedding_size);
         return;
     }
-    
-    // get token count (negative return encodes needed size)
-    int32_t n_tokens = -llama_tokenize(vocab, text, text_len, NULL, 0, true, true);
-    if (n_tokens == 0) {
+
+    // allocate token buffer sized to context limit
+    llama_token *tokens = (llama_token *)sqlite3_malloc64(n_ctx * sizeof(llama_token));
+    if (!tokens) {
         sqlite3_free(embedding);
-        sqlite_context_result_error(context, SQLITE_ERROR, "Tokenization failed: returned %d tokens", n_tokens);
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate tokens buffer");
         return;
     }
+
+    // tokenize directly into the buffer
+    int32_t n_tokens = llama_tokenize(vocab, text, text_len, tokens, n_ctx, true, true);
+    if (n_tokens < 0) {
+        // negative return means input needs more tokens than n_ctx — truncate
+        int32_t n_needed = -n_tokens;
+
+        // check user-defined max_tokens limit
+        if (ai->options.max_tokens > 0 && n_needed > ai->options.max_tokens) {
+            sqlite3_free(tokens);
+            sqlite3_free(embedding);
+            sqlite_context_result_error(context, SQLITE_TOOBIG, "Input too large: %d tokens exceeds max allowed (%d)", n_needed, ai->options.max_tokens);
+            return;
+        }
+
+        // allocate a temporary buffer large enough for the full tokenization, then truncate
+        llama_token *full_tokens = (llama_token *)sqlite3_malloc64(n_needed * sizeof(llama_token));
+        if (!full_tokens) {
+            sqlite3_free(tokens);
+            sqlite3_free(embedding);
+            sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate tokens buffer");
+            return;
+        }
+        int32_t n_actual = llama_tokenize(vocab, text, text_len, full_tokens, n_needed, true, true);
+        if (n_actual < 0 || n_actual != n_needed) {
+            sqlite3_free(full_tokens);
+            sqlite3_free(tokens);
+            sqlite3_free(embedding);
+            sqlite_context_result_error(context, SQLITE_ERROR, "Tokenization failed");
+            return;
+        }
+        // truncate to n_ctx
+        memcpy(tokens, full_tokens, n_ctx * sizeof(llama_token));
+        sqlite3_free(full_tokens);
+        n_tokens = n_ctx;
+    }
+
+    if (n_tokens == 0) {
+        sqlite3_free(tokens);
+        sqlite3_free(embedding);
+        sqlite_context_result_error(context, SQLITE_ERROR, "Tokenization produced no tokens");
+        return;
+    }
+
+    // check user-defined max_tokens limit
     if (ai->options.max_tokens > 0 && n_tokens > ai->options.max_tokens) {
+        sqlite3_free(tokens);
         sqlite3_free(embedding);
         sqlite_context_result_error(context, SQLITE_TOOBIG, "Input too large: %d tokens exceeds max allowed (%d)", n_tokens, ai->options.max_tokens);
         return;
     }
-    
-    // even with chunking, decoder embeddings need the full sequence to be in the KV once
-    if (n_tokens > n_ctx) {
-        sqlite3_free(embedding);
-        sqlite_context_result_error(context, SQLITE_TOOBIG, "Input too large for model context: %d tokens > n_ctx %d. Create a context with a n_ctx value higher than %d.", n_tokens, n_ctx, n_tokens);
-        return;
-    }
-    
-    // allocate tokens and tokenize
-    llama_token *tokens = sqlite3_malloc64(n_tokens * sizeof(llama_token));
-    if (!tokens) {
-        sqlite3_free(embedding);
-        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate tokens memory of size %lld", (long long)(n_tokens * sizeof(llama_token)));
-        return;
-    }
-    
-    // tokenize input
-    int n_actual = llama_tokenize(vocab, text, text_len, tokens, n_tokens, true, true);
-    if (n_actual != n_tokens) {
-        sqlite3_free(tokens);
-        sqlite3_free(embedding);
-        sqlite_context_result_error(context, SQLITE_ERROR, "Tokenization size mismatch: got %d tokens, expected %d", n_actual, n_tokens);
-        return;
-    }
-    
-    // max batch size
-    uint32_t n_batch = llama_n_batch(ctx);
-    
-    size_t pos_base = 0; // running position across chunks
+
+    // prepare batch
     llama_seq_id sequence_id = 0;
     llama_memory_t memory = llama_get_memory(ctx);
-    
+
     if (memory) {
-        // start from a clean slate for this sequence
-        llama_memory_seq_rm(memory, sequence_id, 0, -1);
-        
-        // fresh KV for this prompt (only once!)
-        llama_memory_clear(memory, /*clear_kv_cache_only=*/true);
+        llama_memory_clear(memory, true);
     }
-    
-    // LLAMA_POOLING_TYPE_NONE is disabled in this version
-    const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
-    GGML_ASSERT(pooling_type != LLAMA_POOLING_TYPE_NONE);
-    
-    // init batch: n_seq_max = 1 (single prompt), embd = 0
-    llama_batch batch = llama_batch_init(n_batch, 0, 1);
-    while (pos_base < n_tokens) {
-        llm_batch_clear(&batch);
-        
-        size_t to_feed = (n_tokens - pos_base > n_batch) ? n_batch : (n_tokens - pos_base);
-        
-        // fill the batch with up to n_batch tokens
-        for (size_t i = 0; i < to_feed; ++i) {
-            const llama_token tk = (llama_token)tokens[pos_base + i];
-            const llama_pos   ps = (llama_pos)(pos_base + i);
-            const bool want_logits = (i + 1 == to_feed); // last token in this chunk
-            llm_batch_add(&batch, tk, ps, &sequence_id, 1, want_logits);
-        }
-        
-        // run model on this chunk
-        // from ggerganov: If your application is going to support both models with and without a memory, then you should simply call llama_decode() always
-        // https://github.com/ggml-org/llama.cpp/discussions/14454
-        int32_t rc = (memory) ? llama_decode(ctx, batch) : llama_encode(ctx, batch);
-        if (rc < 0) {
-            sqlite3_free(tokens);
-            sqlite3_free(embedding);
-            llama_batch_free(batch);
-            sqlite_context_result_error(context, SQLITE_ERROR, "Model %s failed during embedding generation (%d)", (memory) ? "decode" : "encode", rc);
-            return;
-        }
-        
-        pos_base += to_feed;
+
+    struct llama_batch batch = {
+        .n_tokens   = n_tokens,
+        .token      = tokens,
+        .embd       = NULL,
+        .pos        = NULL,
+        .n_seq_id   = NULL,
+        .seq_id     = NULL,
+        .logits     = NULL,
+    };
+
+    // encode or decode based on model architecture
+    // encoder-only models (BERT-style) use llama_encode
+    // decoder-only models use llama_decode (which also works for models without memory)
+    int32_t rc = is_encoder_only ? llama_encode(ctx, batch) : llama_decode(ctx, batch);
+    if (rc != 0) {
+        sqlite3_free(tokens);
+        sqlite3_free(embedding);
+        sqlite_context_result_error(context, SQLITE_ERROR, "Model %s failed during embedding generation (%d)", is_encoder_only ? "encode" : "decode", rc);
+        return;
     }
-    
-    // retrieve sentence embedding (pooling is enabled)
-    const float *result = llama_get_embeddings_seq(ctx, sequence_id);
+
+    // retrieve sentence embedding
+    const float *result = NULL;
+    if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
+        result = llama_get_embeddings_ith(ctx, n_tokens - 1);
+    } else {
+        result = llama_get_embeddings_seq(ctx, sequence_id);
+    }
     if (result == NULL) {
         sqlite3_free(tokens);
         sqlite3_free(embedding);
-        llama_batch_free(batch);
         sqlite_context_result_error(context, SQLITE_ERROR, "Failed to retrieve embedding vector from model");
         return;
     }
-    
-    // llm_embed_debug((const void *)result, EMBEDDING_TYPE_F32, dimension);
-    
-    // check if normalization is needed (default true)
+
+    // normalize or copy embedding
     if (ai->options.embedding.normalize) {
         llm_embed_normalize(result, embedding, type, dimension);
     } else {
-        // copy buffer
         llm_embed_copy(result, embedding, type, dimension, embedding_size);
     }
-    
-    // IMPORTANT: clear memory for this sequence so the next call starts clean
+
+    // clear memory so the next call starts clean
     if (memory) {
-        // remove tokens in this sequence and optionally compact
         llama_memory_seq_rm(memory, sequence_id, 0, -1);
         llama_memory_clear(memory, true);
     }
-    
-    // llm_embed_debug(embedding, type, dimension);
-    
+
     // check if JSON output is set
     if (ai->options.embedding.json_output) {
         sqlite3_str *s = sqlite3_str_new(sqlite3_context_db_handle(context));
@@ -1297,24 +1403,24 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
         for (int i = 0; i < dimension; i++) {
             if (i) sqlite3_str_appendchar(s, 1, ',');
             float value = 0.0;
-            
+
             switch (type) {
                 case EMBEDDING_TYPE_F32:
                     value = ((float *)embedding)[i];
                     break;
-                    
+
                 case EMBEDDING_TYPE_F16:
                     value = float16_to_float32(((uint16_t *)embedding)[i]);
                     break;
-                
+
                 case EMBEDDING_TYPE_BF16:
                     value = bfloat16_to_float32(((uint16_t *)embedding)[i]);
                     break;
-                
+
                 case EMBEDDING_TYPE_U8:
                     value = (float)(((uint8_t *)embedding)[i]);
                     break;
-                
+
                 case EMBEDDING_TYPE_I8:
                     value = (float)(((int8_t *)embedding)[i]);
                     break;
@@ -1322,16 +1428,15 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
             sqlite3_str_appendf(s, "%.6g", value);
         }
         sqlite3_str_appendchar(s, 1, ']');
-        
+
         char *json = sqlite3_str_finish(s);
         (json) ? sqlite3_result_text(context, json, -1, sqlite3_free) : sqlite3_result_null(context);
         sqlite3_free(embedding);
     } else {
         sqlite3_result_blob(context, embedding, embedding_size, sqlite3_free);
     }
-    
+
     sqlite3_free(tokens);
-    llama_batch_free(batch);
 }
 
 static void llm_embed_generate (sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -1381,109 +1486,182 @@ static void llm_token_count (sqlite3_context *context, int argc, sqlite3_value *
 
 static void llm_text_run (sqlite3_context *context, const char *text, int32_t text_len) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    
+    llama_token *tokens = NULL;
+    bool buffer_initialized = false;
+    buffer_t buffer = {0};
+    char *formatted_prompt = NULL;
+
     // sanity check vocab
     const struct llama_vocab *vocab = llama_model_get_vocab(ai->model);
     if (!vocab) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Failed to extract vocabulary from the model");
         return;
     }
-    
-    // find the number of tokens in the prompt
-    const int n_prompt = -llama_tokenize(vocab, text, text_len, NULL, 0, true, true);
-    if (n_prompt == 0) {
-        sqlite_context_result_error(context, SQLITE_ERROR, "Unable to extract number of tokens from prompt");
-        return;
-    }
-    
-    // allocate space for the tokens and tokenize the prompt
-    llama_token *tokens = (llama_token *)sqlite3_malloc(n_prompt * sizeof(llama_token));
-    if (!tokens) {
-        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate %d tokens", n_prompt);
-        return;
-    }
-    
-    int n_actual = llama_tokenize(vocab, text, text_len, tokens, n_prompt, true, true);
-    if (n_actual != n_prompt) {
-        sqlite3_free(tokens);
-        sqlite_context_result_error(context, SQLITE_ERROR, "Tokenization size mismatch: got %d tokens, expected %d", n_actual, n_prompt);
-        return;
-    }
-     
+
     struct llama_context *ctx = ai->ctx;
     if (ctx == NULL) {
-        sqlite3_free(tokens);
-        sqlite_context_result_error(context, SQLITE_ERROR, "Failed to create the llama_context");
+        sqlite_context_result_error(context, SQLITE_ERROR, "No context found. Please call llm_context_create() before using this function.");
         return;
     }
-    
+
+    // if the model has a chat template, wrap the prompt so the model emits EOG tokens
+    const char *chat_template = llama_model_chat_template(ai->model, NULL);
+    if (chat_template) {
+        llama_chat_message messages[] = {{ ROLE_USER, text }};
+        int32_t formatted_len = llama_chat_apply_template(chat_template, messages, 1, true, NULL, 0);
+        if (formatted_len > 0) {
+            formatted_prompt = (char *)sqlite3_malloc64(formatted_len + 1);
+            if (!formatted_prompt) {
+                sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate formatted prompt");
+                return;
+            }
+            llama_chat_apply_template(chat_template, messages, 1, true, formatted_prompt, formatted_len + 1);
+            formatted_prompt[formatted_len] = '\0';
+            text = formatted_prompt;
+            text_len = formatted_len;
+        }
+    }
+
+    // clear KV cache so each generation starts clean
+    llama_memory_t memory = llama_get_memory(ctx);
+    if (memory) llama_memory_clear(memory, true);
+
+    const int n_ctx = (int)llama_n_ctx(ctx);
+    const int n_batch = (int)llama_n_batch(ctx);
+
+    // find the number of tokens in the prompt
+    int n_prompt = -llama_tokenize(vocab, text, text_len, NULL, 0, true, true);
+    if (n_prompt <= 0) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Unable to extract number of tokens from prompt");
+        goto error;
+    }
+
+    // ensure prompt leaves room for at least one generated token
+    int max_prompt = n_ctx - 1;
+    if (max_prompt <= 0) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Context size too small for text generation (n_ctx=%d)", n_ctx);
+        goto error;
+    }
+    if (n_prompt > max_prompt) {
+        n_prompt = max_prompt;
+    }
+
+    // allocate space for the tokens and tokenize the prompt
+    tokens = (llama_token *)sqlite3_malloc(n_prompt * sizeof(llama_token));
+    if (!tokens) {
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate %d tokens", n_prompt);
+        goto error;
+    }
+
+    int n_actual = llama_tokenize(vocab, text, text_len, tokens, n_prompt, true, true);
+    if (n_actual < 0) {
+        // input needs more tokens than n_prompt — tokenize fully then truncate
+        int n_full = -n_actual;
+        llama_token *full_tokens = (llama_token *)sqlite3_malloc(n_full * sizeof(llama_token));
+        if (!full_tokens) {
+            sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate %d tokens", n_full);
+            goto error;
+        }
+        int n_got = llama_tokenize(vocab, text, text_len, full_tokens, n_full, true, true);
+        if (n_got < 0 || n_got != n_full) {
+            sqlite3_free(full_tokens);
+            sqlite_context_result_error(context, SQLITE_ERROR, "Tokenization failed");
+            goto error;
+        }
+        memcpy(tokens, full_tokens, n_prompt * sizeof(llama_token));
+        sqlite3_free(full_tokens);
+    } else {
+        n_prompt = n_actual;
+    }
+
+    // when n_predict is not set, default to 4096 tokens (capped by remaining context space)
+    // and let the model stop naturally via EOG
+    int n_predict = (ai->options.n_predict > 0) ? ai->options.n_predict : 4096;
+    if (n_predict > n_ctx - n_prompt) n_predict = n_ctx - n_prompt;
+    if (n_predict <= 0) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Prompt fills entire context (%d tokens), no room for generation", n_prompt);
+        goto error;
+    }
+
     // initialize the sampler
     bool sampler_already_setup = (ai->sampler != NULL);
     struct llama_sampler *sampler = llm_sampler_check(ai);
-    if (!sampler) return;
+    if (!sampler) goto error;
     if (!sampler_already_setup) {
         // no sampler was setup, so initialize it with some default values
         llama_sampler_chain_add(sampler, llama_sampler_init_penalties(64, 1.1, 0, 0));
         llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
     }
-    
-    // prepare a batch for the prompt
-    struct llama_batch batch = llama_batch_get_one(tokens, n_prompt);
-    
-    int n_decode = 0;
-    llama_token new_token_id;
-    buffer_t buffer;
-    int n_predict = (ai->options.n_predict > 0) ? ai->options.n_predict : NPREDICT_DEFAULT_VALUE;
-    uint32_t buffer_size = ((n_prompt + n_predict) * MAX_TOKEN_TEXT_LEN); // should be more than enough to avoid a reallocation
-    if (!buffer_create(&buffer, buffer_size)) {
-        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate buffer (%d bytes)", buffer_size);
-        goto cleanup;
+
+    // allocate output buffer (starts small, grows dynamically via buffer_append)
+    if (!buffer_create(&buffer, 0)) {
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate buffer");
+        goto error_sampler;
     }
-    
-    for (int n_pos = 0; n_pos + batch.n_tokens < n_prompt + n_predict; ) {
-        // evaluate the current batch with the transformer model
-        if (llama_decode(ctx, batch)) {
-            sqlite_context_result_error(context, SQLITE_ERROR, "Failed to execute the decoding function");
-            goto cleanup;
+    buffer_initialized = true;
+
+    // feed prompt in batches of n_batch tokens
+    {
+        int prompt_pos = 0;
+        while (prompt_pos < n_prompt) {
+            int chunk = n_prompt - prompt_pos;
+            if (chunk > n_batch) chunk = n_batch;
+            struct llama_batch batch = llama_batch_get_one(tokens + prompt_pos, chunk);
+            if (llama_decode(ctx, batch)) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to execute the decoding function during prompt processing");
+                goto error_sampler;
+            }
+            prompt_pos += chunk;
         }
-
-        n_pos += batch.n_tokens;
-
-        // sample the next token
-        new_token_id = llama_sampler_sample(sampler, ctx, -1);
-
-        // is it an end of generation?
-        if (llama_vocab_is_eog(vocab, new_token_id)) {
-            break;
-        }
-
-        char buf[MAX_TOKEN_TEXT_LEN];
-        int n = llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
-        if (n < 0) {
-            sqlite_context_result_error(context, SQLITE_ERROR, "Failed to convert token to piece (%d)", n);
-            goto cleanup;
-        }
-        
-        if (buffer_append(&buffer, buf, n, true) == false) {
-            sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate and append buffer (%d bytes)", buffer.capacity + n);
-            goto cleanup;
-        }
-        
-        // print token as string
-        // fwrite(buf, 1, n, stdout);
-        // fflush(stdout);
-
-        // prepare the next batch with the sampled token
-        batch = llama_batch_get_one(&new_token_id, 1);
-
-        n_decode += 1;
     }
-    
+
+    // generate tokens
+    {
+        llama_token new_token_id;
+        for (int i = 0; i < n_predict; i++) {
+            new_token_id = llama_sampler_sample(sampler, ctx, -1);
+
+            if (llama_vocab_is_eog(vocab, new_token_id)) {
+                break;
+            }
+
+            char buf[MAX_TOKEN_TEXT_LEN];
+            int n = llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
+            if (n < 0) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to convert token to piece (%d)", n);
+                goto error_sampler;
+            }
+
+            if (buffer_append(&buffer, buf, n, true) == false) {
+                sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to append to buffer");
+                goto error_sampler;
+            }
+
+            // decode the sampled token to advance the KV cache
+            struct llama_batch batch = llama_batch_get_one(&new_token_id, 1);
+            if (llama_decode(ctx, batch)) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to execute the decoding function during generation");
+                goto error_sampler;
+            }
+        }
+    }
+
+    // success — transfer buffer ownership to SQLite
     sqlite3_result_text(context, buffer.data, buffer.length, sqlite3_free);
-    
-cleanup:
     sqlite3_free(tokens);
+    sqlite3_free(formatted_prompt);
     if (!sampler_already_setup) llama_sampler_free(sampler);
+    return;
+
+error_sampler:
+    if (!sampler_already_setup && ai->sampler) {
+        llama_sampler_free(ai->sampler);
+        ai->sampler = NULL;
+    }
+error:
+    if (buffer_initialized) buffer_destroy(&buffer);
+    sqlite3_free(tokens);
+    sqlite3_free(formatted_prompt);
 }
 
 static void llm_text_generate (sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -1529,14 +1707,19 @@ static bool llm_chat_check_context (ai_context *ai) {
     ai_uuid_v7_string(ai->chat.uuid, true);
     
     int n_ctx = llama_n_ctx(ai->ctx);
-    buffer_create(&ai->chat.formatted, n_ctx);
-    buffer_create(&ai->chat.response, MIN_ALLOC_RESPONSE);
-    
-    // do not report an error in case of malloc failure (it will be reported later by the function or the vtab)
+    if (!buffer_create(&ai->chat.formatted, n_ctx) || !buffer_create(&ai->chat.response, MIN_ALLOC_RESPONSE)) {
+        sqlite_common_set_error(ai->context, ai->vtab, SQLITE_NOMEM, "Out of memory: failed to allocate chat buffers");
+        return false;
+    }
+
     ai->chat.prompt = (char *)sqlite3_malloc(MIN_ALLOC_PROMPT);
     ai->chat.tokens = (llama_token *)sqlite3_malloc(sizeof(llama_token) * MIN_ALLOC_TOKEN);
-    if (ai->chat.tokens) ai->chat.ntokens = MIN_ALLOC_TOKEN;
-    
+    if (!ai->chat.prompt || !ai->chat.tokens) {
+        sqlite_common_set_error(ai->context, ai->vtab, SQLITE_NOMEM, "Out of memory: failed to allocate chat prompt/token buffers");
+        return false;
+    }
+    ai->chat.ntokens = MIN_ALLOC_TOKEN;
+
     return true;
 }
 
@@ -1705,6 +1888,10 @@ static bool llm_chat_run (ai_context *ai, ai_cursor *c, const char *user_prompt)
     
     // check if there is enough space for the new formatted prompt
     int32_t prompt_len = new_len - ai->chat.prev_len;
+    if (prompt_len <= 0) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Invalid prompt length (template state inconsistency)");
+        return false;
+    }
     int32_t current_len = (int32_t)sqlite3_msize(ai->chat.prompt); // safe even if ai->chat.prompt is NULL
     if (current_len < prompt_len + 1) {
         char *buffer = (char *)sqlite3_malloc64(prompt_len + MIN_ALLOC_PROMPT);
@@ -1806,15 +1993,15 @@ static int llm_chat_cursor_open (sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCu
 static int llm_chat_cursor_close (sqlite3_vtab_cursor *cur) {
     ai_cursor *c = (ai_cursor *)cur;
     ai_context *ai = c->ai;
-    
-    // save response when cursor closes
-    sqlite3_free(c);
-    
+
+    // save response before freeing the cursor
     ai_messages *messages = &ai->chat.messages;
     const char *template = ai->chat.template;
-    if (llm_chat_save_response(ai, messages, template) == false) return SQLITE_ERROR;
-    
-    return SQLITE_OK;
+    bool saved = llm_chat_save_response(ai, messages, template);
+
+    sqlite3_free(c);
+
+    return saved ? SQLITE_OK : SQLITE_ERROR;
 }
 
 static int llm_chat_cursor_next (sqlite3_vtab_cursor *cur) {
@@ -1857,9 +2044,8 @@ static int llm_chat_cursor_filter (sqlite3_vtab_cursor *cur, int idxNum, const c
     }
     
     ai->chat.token_count = 0;
-    buffer_reset(&ai->chat.formatted);
     buffer_reset(&ai->chat.response);
-    
+
     const char *user_prompt = (const char *)sqlite3_value_text(argv[0]);
     bool result = llm_chat_run(ai, c, user_prompt);
     return (result) ? SQLITE_OK : SQLITE_ERROR;
@@ -1897,19 +2083,25 @@ static sqlite3_module llm_chat = {
 
 static void llm_chat_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    
+
     // reset UUID and cleanup chat related memory
     memset(ai->chat.uuid, 0, UUID_STR_MAXLEN);
-    
+
     buffer_destroy(&ai->chat.response);
     buffer_destroy(&ai->chat.formatted);
     llm_messages_free(&ai->chat.messages);
-    
+
     if (ai->chat.tokens) sqlite3_free(ai->chat.tokens);
+    ai->chat.tokens = NULL;
     ai->chat.ntokens = 0;
-    
+
     if (ai->chat.prompt) sqlite3_free(ai->chat.prompt);
+    ai->chat.prompt = NULL;
     ai->chat.prev_len = 0;
+
+    ai->chat.template = NULL;
+    ai->chat.vocab = NULL;
+    ai->chat.token_count = 0;
 }
 
 static void llm_chat_create (sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -1977,6 +2169,8 @@ static void llm_chat_save (sqlite3_context *context, int argc, sqlite3_value **a
     for (int i=0; i < messages->count; i++) {
         const char *role = messages->items[i].role;
         const char *content = messages->items[i].content;
+        // skip empty system message placeholder
+        if (role == ROLE_SYSTEM && (!content || content[0] == '\0')) continue;
         const char *values2[] = {rowid_s, role, content};
         int rc = sqlite_db_write(context, db, sql, values2, types2, lens, 3);
         if (rc != SQLITE_OK) goto abort_save;
@@ -1995,47 +2189,51 @@ static void llm_chat_restore (sqlite3_context *context, int argc, sqlite3_value 
     // sanity check argument
     int types[] = {SQLITE_TEXT};
     if (sqlite_sanity_function(context, "llm_chat_restore", argc, argv, 1, types, false, false) == false) return;
-    
+
     // free old chat (if any)
     llm_chat_free(context, 0, NULL);
-    
+
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+
+    // re-initialize chat state (UUID, buffers, tokens)
+    if (llm_chat_check_context(ai) == false) return;
+
     // UUID
     const char *uuid = (const char *)sqlite3_value_text(argv[0]);
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
     sqlite3 *db = sqlite3_context_db_handle(context);
-    
+
     const char *sql = "SELECT m.role, m.content FROM ai_chat_messages m JOIN ai_chat_history h ON m.chat_id = h.id WHERE h.uuid = ? ORDER BY m.id ASC;";
     sqlite3_stmt *vm = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &vm, NULL);
     if (rc != SQLITE_OK) goto abort_restore;
-    
+
     rc = sqlite3_bind_text(vm, 1, uuid, -1, SQLITE_STATIC);
     if (rc != SQLITE_OK) goto abort_restore;
-    
+
     int counter = 0;
     ai_messages *messages = &ai->chat.messages;
     while (1) {
         rc = sqlite3_step(vm);
         if (rc == SQLITE_DONE) {rc = SQLITE_OK; break;}
         if (rc != SQLITE_ROW) goto abort_restore;
-        
+
         const char *role = (const char *)sqlite3_column_text(vm, 0);
         const char *content = (const char *)sqlite3_column_text(vm, 1);
-        
+
         if (!llm_messages_append(messages, role, content)) {
-            sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to append response");
-            rc = SQLITE_OK;
-            goto abort_restore;
+            sqlite_context_result_error(context, SQLITE_ERROR, "Failed to append message during restore");
+            sqlite3_finalize(vm);
+            return;
         }
         ++counter;
     }
-    
+
     sqlite3_result_int(context, counter);
     if (vm) sqlite3_finalize(vm);
     return;
-    
+
 abort_restore:
-    if (rc != SQLITE_OK) sqlite3_result_error(context, sqlite3_errmsg(db), rc);
+    sqlite3_result_error(context, sqlite3_errmsg(db), -1);
     if (vm) sqlite3_finalize(vm);
 }
 
@@ -2053,7 +2251,6 @@ static void llm_chat_respond (sqlite3_context *context, int argc, sqlite3_value 
     ai->vtab = NULL;
     
     ai->chat.token_count = 0;
-    buffer_reset(&ai->chat.formatted);
     buffer_reset(&ai->chat.response);
     llm_chat_run(ai, NULL, user_prompt);
 }
@@ -2335,10 +2532,11 @@ static void llm_sampler_init_penalties (sqlite3_context *context, int argc, sqli
 
 static void llm_lora_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    llama_clear_adapter_lora(ai->ctx);
+    if (ai->ctx) llama_set_adapters_lora(ai->ctx, NULL, 0, NULL);
     for (int i=0; i<MAX_LORAS; ++i) {
         if (ai->lora[i]) {
             llama_adapter_lora_free(ai->lora[i]);
+            ai->lora[i] = NULL;
         }
     }
 }
@@ -2366,11 +2564,18 @@ static void llm_lora_load (sqlite3_context *context, int argc, sqlite3_value **a
         return;
     }
     
-    llama_clear_adapter_lora(ai->ctx);
-    for (int i=0; i<MAX_LORAS; ++i) {
-        if (ai->lora[i] && ai->lora_scale[i] != 0.0) {
-            llama_set_adapter_lora(ai->ctx, ai->lora[i], ai->lora_scale[i]);
+    {
+        struct llama_adapter_lora *adapters[MAX_LORAS];
+        float scales[MAX_LORAS];
+        size_t n = 0;
+        for (int i=0; i<MAX_LORAS; ++i) {
+            if (ai->lora[i] && ai->lora_scale[i] != 0.0) {
+                adapters[n] = ai->lora[i];
+                scales[n] = ai->lora_scale[i];
+                n++;
+            }
         }
+        llama_set_adapters_lora(ai->ctx, adapters, n, scales);
     }
     
     sqlite3_result_int(context, index);
@@ -2414,7 +2619,28 @@ static bool llm_context_create_with_options (sqlite3_context *context, ai_contex
         sqlite_context_result_error(context, SQLITE_ERROR, "Embedding type (embedding_type) must be specified in the create context funtion");
         return false;
     }
-    
+
+    // auto-size n_ctx to the model's training window when no explicit context_size was set
+    // llama_context_default_params() sets n_ctx=512; setting n_ctx=0 tells llama.cpp to use n_ctx_train
+    struct llama_context_params defaults = llama_context_default_params();
+    if (ai->model && ctx_params.n_ctx == defaults.n_ctx) {
+        ctx_params.n_ctx = 0;
+    }
+
+    // for embedding contexts, clamp n_ctx to n_ctx_train to avoid position overflow
+    if (ctx_params.embeddings && ai->model) {
+        int n_ctx_train = llama_model_n_ctx_train(ai->model);
+        if ((int)ctx_params.n_ctx > n_ctx_train) {
+            ctx_params.n_ctx = n_ctx_train;
+        }
+        if ((int)ctx_params.n_batch > (int)ctx_params.n_ctx && ctx_params.n_ctx > 0) {
+            ctx_params.n_batch = ctx_params.n_ctx;
+        }
+        if ((int)ctx_params.n_ubatch > (int)ctx_params.n_batch) {
+            ctx_params.n_ubatch = ctx_params.n_batch;
+        }
+    }
+
     struct llama_context *ctx = llama_init_from_model(ai->model, ctx_params);
     if (!ctx) {
         sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "Unable to create context from model");
@@ -2612,8 +2838,9 @@ static void llm_model_cls_label (sqlite3_context *context, int argc, sqlite3_val
     int i = sqlite3_value_int(argv[0]);
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     const char *label = llama_model_cls_label(ai->model, i);
-    
-    sqlite3_result_text(context, label, -1, SQLITE_STATIC);
+
+    if (label) sqlite3_result_text(context, label, -1, SQLITE_STATIC);
+    else sqlite3_result_null(context);
 }
 
 static void llm_model_desc (sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -2676,57 +2903,210 @@ static bool audio_process_check_arguments (sqlite3_context *context, const char 
     return sqlite_context_result_error(context, SQLITE_ERROR, "Function '%s' expects 1 or 2 arguments, but %d were provided.", function_name, argc);
 }
 
-static void audio_process_run (sqlite3_context *context, const float *buffer, uint64_t num_samples, uint32_t sample_rate, uint16_t channels, const char *options) {
-    struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (parse_keyvalue_string(ai, options, whisper_full_params_options_callback, &params) == false) {
-        sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
-        return;
-    }
-    
-    // int rc = whisper_full(ai->whisper, params, buffer, (int)num_samples);
+// detect audio format from file extension
+static int audio_detect_format_from_path (const char *path) {
+    if (!path) return 0;
+    const char *dot = strrchr(path, '.');
+    if (!dot) return 0;
+    if (strcasecmp(dot, ".wav") == 0) return 1;
+    if (strcasecmp(dot, ".mp3") == 0) return 2;
+    if (strcasecmp(dot, ".flac") == 0) return 3;
+    return 0;
 }
 
-static void audio_process_flac (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    if (audio_process_check_arguments(context, "audio_process_flac", argc, argv, true) == false) return;
-    
-    float *buffer = NULL;
+// detect audio format from blob header (magic bytes)
+static int audio_detect_format_from_blob (const void *data, size_t size) {
+    if (!data || size < 4) return 0;
+    const uint8_t *bytes = (const uint8_t *)data;
+
+    // WAV: starts with "RIFF"
+    if (bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F') return 1;
+
+    // MP3: starts with ID3 tag or MPEG sync word
+    if (bytes[0] == 'I' && bytes[1] == 'D' && bytes[2] == '3') return 2;
+    if (bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0) return 2;
+
+    // FLAC: starts with "fLaC"
+    if (bytes[0] == 'f' && bytes[1] == 'L' && bytes[2] == 'a' && bytes[3] == 'C') return 3;
+
+    return 0;
+}
+
+// convert multi-channel audio to mono by averaging channels, then resample to target_rate
+static float *audio_convert_to_mono_16khz (const float *src, uint64_t num_samples, uint32_t sample_rate, uint32_t channels, int *out_samples) {
+    // step 1: downmix to mono
+    uint64_t mono_count = num_samples; // num_samples is per-channel frame count
+    float *mono = NULL;
+
+    if (channels == 1) {
+        // already mono — just reference (we'll copy during resampling)
+        mono = (float *)src;
+    } else {
+        mono = (float *)sqlite3_malloc64(mono_count * sizeof(float));
+        if (!mono) return NULL;
+        for (uint64_t i = 0; i < mono_count; i++) {
+            float sum = 0.0f;
+            for (uint32_t c = 0; c < channels; c++) {
+                sum += src[i * channels + c];
+            }
+            mono[i] = sum / channels;
+        }
+    }
+
+    // step 2: resample to WHISPER_SAMPLE_RATE (16000 Hz) if needed
+    if (sample_rate == WHISPER_SAMPLE_RATE) {
+        if (mono == src) {
+            // need to copy so caller can free
+            float *copy = (float *)sqlite3_malloc64(mono_count * sizeof(float));
+            if (!copy) return NULL;
+            memcpy(copy, src, mono_count * sizeof(float));
+            mono = copy;
+        }
+        *out_samples = (int)mono_count;
+        return mono;
+    }
+
+    // linear interpolation resampling
+    double ratio = (double)WHISPER_SAMPLE_RATE / (double)sample_rate;
+    int64_t out_count = (int64_t)(mono_count * ratio) + 1;
+    float *resampled = (float *)sqlite3_malloc64(out_count * sizeof(float));
+    if (!resampled) {
+        if (mono != src) sqlite3_free(mono);
+        return NULL;
+    }
+
+    for (int64_t i = 0; i < out_count; i++) {
+        double src_idx = i / ratio;
+        int64_t idx0 = (int64_t)src_idx;
+        double frac = src_idx - idx0;
+        if (idx0 >= (int64_t)mono_count - 1) {
+            resampled[i] = mono[mono_count - 1];
+        } else {
+            resampled[i] = (float)(mono[idx0] * (1.0 - frac) + mono[idx0 + 1] * frac);
+        }
+    }
+
+    if (mono != src) sqlite3_free(mono);
+    *out_samples = (int)out_count;
+    return resampled;
+}
+
+static void audio_model_transcribe (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (audio_process_check_arguments(context, "audio_model_transcribe", argc, argv, true) == false) return;
+
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    float *pcm_buffer = NULL;
     uint64_t num_samples = 0;
     uint32_t sample_rate = 0;
-    uint16_t channels = 0;
-    
+    uint32_t channels = 0;
+
     if (sqlite3_value_type(argv[0]) == SQLITE_TEXT) {
         const char *path = (const char *)sqlite3_value_text(argv[0]);
-        buffer = audio_flac_file2pcm(path, &num_samples, &sample_rate, &channels);
-        if (!buffer) {
-            sqlite_context_result_error(context, SQLITE_ERROR, "Unable to convert FLAC file %s to PCM.", path);
+        int format = audio_detect_format_from_path(path);
+        switch (format) {
+            case 1: pcm_buffer = audio_wav_file2pcm(path, &num_samples, &sample_rate, &channels); break;
+            case 2: pcm_buffer = audio_mp3_file2pcm(path, &num_samples, &sample_rate, &channels); break;
+            case 3: pcm_buffer = audio_flac_file2pcm(path, &num_samples, &sample_rate, &channels); break;
+            default:
+                sqlite_context_result_error(context, SQLITE_ERROR, "Unsupported audio format for file '%s'. Supported: .wav, .mp3, .flac", path);
+                return;
+        }
+        if (!pcm_buffer) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Unable to decode audio file '%s'", path);
             return;
         }
     } else {
         const void *data = sqlite3_value_blob(argv[0]);
         size_t data_size = (size_t)sqlite3_value_bytes(argv[0]);
-        buffer = audio_flac_mem2pcm(data, data_size, &num_samples, &sample_rate, &channels);
-        if (!buffer) {
-            sqlite_context_result_error(context, SQLITE_ERROR, "Unable to convert FLAC blob to PCM.");
+        int format = audio_detect_format_from_blob(data, data_size);
+        switch (format) {
+            case 1: pcm_buffer = audio_wav_mem2pcm(data, data_size, &num_samples, &sample_rate, &channels); break;
+            case 2: pcm_buffer = audio_mp3_mem2pcm(data, data_size, &num_samples, &sample_rate, &channels); break;
+            case 3: pcm_buffer = audio_flac_mem2pcm(data, data_size, &num_samples, &sample_rate, &channels); break;
+            default:
+                sqlite_context_result_error(context, SQLITE_ERROR, "Unsupported audio format in BLOB. Supported: WAV, MP3, FLAC");
+                return;
+        }
+        if (!pcm_buffer) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Unable to decode audio BLOB");
             return;
         }
     }
-    
+
+    // convert to mono 16kHz as required by whisper
+    int whisper_samples = 0;
+    float *whisper_pcm = audio_convert_to_mono_16khz(pcm_buffer, num_samples, sample_rate, channels, &whisper_samples);
+    sqlite3_free(pcm_buffer); // allocated via miniaudio's sqlite3_malloc wrapper
+
+    if (!whisper_pcm || whisper_samples <= 0) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Failed to convert audio to mono 16kHz PCM");
+        return;
+    }
+
+    // parse transcription options
+    struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    params.print_special = false;
+    params.print_progress = false;
+    params.print_realtime = false;
+    params.print_timestamps = false;
+
+    // save default pointers so we can tell which ones we allocated
+    const char *default_language = params.language;
+    const char *default_initial_prompt = params.initial_prompt;
+    const char *default_suppress_regex = params.suppress_regex;
+
     const char *options = (argc >= 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
-    audio_process_run(context, buffer, num_samples, sample_rate, channels, options);
-    
-}
+    if (parse_keyvalue_string(ai, options, whisper_full_params_options_callback, &params) == false) {
+        sqlite3_free(whisper_pcm);
+        if (params.language != default_language) sqlite3_free((void *)params.language);
+        if (params.initial_prompt != default_initial_prompt) sqlite3_free((void *)params.initial_prompt);
+        if (params.suppress_regex != default_suppress_regex) sqlite3_free((void *)params.suppress_regex);
+        sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
+        return;
+    }
 
-static void audio_process_mp3 (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    if (audio_process_check_arguments(context, "audio_process_mp3", argc, argv, true) == false) return;
-}
+    // run whisper inference
+    int rc = whisper_full(ai->whisper, params, whisper_pcm, whisper_samples);
+    sqlite3_free(whisper_pcm);
 
-static void audio_process_wav (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    if (audio_process_check_arguments(context, "audio_process_wav", argc, argv, true) == false) return;
-}
+    // free allocated option strings (only those we allocated via sqlite_strdup)
+    if (params.language != default_language) sqlite3_free((void *)params.language);
+    if (params.initial_prompt != default_initial_prompt) sqlite3_free((void *)params.initial_prompt);
+    if (params.suppress_regex != default_suppress_regex) sqlite3_free((void *)params.suppress_regex);
 
-static void audio_process (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    if (audio_process_check_arguments(context, "audio_process", argc, argv, true) == false) return;
+    if (rc != 0) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Whisper transcription failed (error code %d)", rc);
+        return;
+    }
+
+    // collect all segments into a single result
+    int n_segments = whisper_full_n_segments(ai->whisper);
+    if (n_segments == 0) {
+        sqlite3_result_text(context, "", 0, SQLITE_STATIC);
+        return;
+    }
+
+    if (n_segments == 1) {
+        const char *text = whisper_full_get_segment_text(ai->whisper, 0);
+        sqlite3_result_text(context, text, -1, SQLITE_TRANSIENT);
+        return;
+    }
+
+    // multiple segments — concatenate
+    buffer_t result = {0};
+    if (!buffer_create(&result, 4096)) {
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory");
+        return;
+    }
+
+    for (int i = 0; i < n_segments; i++) {
+        const char *seg_text = whisper_full_get_segment_text(ai->whisper, i);
+        if (seg_text) {
+            buffer_append(&result, seg_text, (uint32_t)strlen(seg_text), false);
+        }
+    }
+
+    sqlite3_result_text(context, result.data, result.length, sqlite3_free);
 }
 
 static void audio_model_load (sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -3001,16 +3381,20 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     if (rc != SQLITE_OK) goto cleanup;
     
     // WHISPER
-    /*
     rc = sqlite3_create_function(db, "audio_model_load", 1, SQLITE_UTF8, ctx, audio_model_load, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
-    
+
     rc = sqlite3_create_function(db, "audio_model_load", 2, SQLITE_UTF8, ctx, audio_model_load, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
-    
+
     rc = sqlite3_create_function(db, "audio_model_free", 0, SQLITE_UTF8, ctx, audio_model_free, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
-    */
+
+    rc = sqlite3_create_function(db, "audio_model_transcribe", 1, SQLITE_UTF8, ctx, audio_model_transcribe, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "audio_model_transcribe", 2, SQLITE_UTF8, ctx, audio_model_transcribe, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
      
 cleanup:
     return rc;

@@ -44,6 +44,15 @@ GGUF_MODEL_DIR ?= tests/models/unsloth/gemma-3-270m-it-GGUF
 GGUF_MODEL_NAME ?= gemma-3-270m-it-UD-IQ2_M.gguf
 GGUF_MODEL_URL ?= https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-UD-IQ2_M.gguf
 GGUF_MODEL_PATH := $(GGUF_MODEL_DIR)/$(GGUF_MODEL_NAME)
+
+WHISPER_MODEL_DIR ?= tests/models/ggerganov/whisper-tiny
+WHISPER_MODEL_NAME ?= ggml-tiny.bin
+WHISPER_MODEL_URL ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+WHISPER_MODEL_PATH := $(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)
+
+AUDIO_TEST_DIR ?= tests/audio
+AUDIO_TEST_WAV ?= $(AUDIO_TEST_DIR)/jfk.wav
+AUDIO_TEST_WAV_URL ?= https://github.com/ggml-org/whisper.cpp/raw/master/samples/jfk.wav
 SKIP_UNITTEST ?= 0
 
 # Compiler and flags
@@ -88,7 +97,8 @@ ifeq ($(PLATFORM),windows)
 	STRIP = strip --strip-unneeded $@
 else ifeq ($(PLATFORM),macos)
 	TARGET := $(DIST_DIR)/ai.dylib
-	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a
+	LLAMA_LIBS += $(BUILD_GGML)/lib/libggml-metal.a $(BUILD_GGML)/lib/libggml-blas.a
+	LLAMA_LDFLAGS += $(L)ggml-blas$(A)
 	ifndef ARCH
 		LDFLAGS += -arch x86_64 -arch arm64
 		CFLAGS += -arch x86_64 -arch arm64
@@ -102,7 +112,7 @@ else ifeq ($(PLATFORM),macos)
 		WHISPER_OPTIONS += -DGGML_OPENMP=OFF -DCMAKE_OSX_ARCHITECTURES="$(ARCH)" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
 		MINIAUDIO_OPTIONS += -DCMAKE_OSX_ARCHITECTURES="$(ARCH)" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
 	endif
-	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup -headerpad_max_install_names
+	LDFLAGS += -L./$(BUILD_GGML)/lib -lggml-metal -L./$(BUILD_GGML)/lib -framework Accelerate -framework Metal -framework Foundation -framework CoreFoundation -framework QuartzCore -dynamiclib -undefined dynamic_lookup -headerpad_max_install_names
 	STRIP = strip -x -S $@
 else ifeq ($(PLATFORM),android)
 	ifndef ARCH # Set ARCH to find Android NDK's Clang compiler, the user should set the ARCH
@@ -235,16 +245,24 @@ $(GGUF_MODEL_PATH):
 	@mkdir -p $(GGUF_MODEL_DIR)
 	curl -L --fail --retry 3 -o $@ $(GGUF_MODEL_URL)
 
+$(WHISPER_MODEL_PATH):
+	@mkdir -p $(WHISPER_MODEL_DIR)
+	curl -L --fail --retry 3 -o $@ $(WHISPER_MODEL_URL)
+
+$(AUDIO_TEST_WAV):
+	@mkdir -p $(AUDIO_TEST_DIR)
+	curl -L --fail --retry 3 -o $@ $(AUDIO_TEST_WAV_URL)
+
 TEST_DEPS := $(TARGET)
 ifeq ($(SKIP_UNITTEST),0)
-TEST_DEPS += $(CTEST_BIN) $(GGUF_MODEL_PATH)
+TEST_DEPS += $(CTEST_BIN) $(GGUF_MODEL_PATH) $(WHISPER_MODEL_PATH) $(AUDIO_TEST_WAV)
 endif
 
 test: $(TEST_DEPS)
 		@echo "Running sqlite3 CLI smoke test (ensures .load works)..."
 		$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
 ifeq ($(SKIP_UNITTEST),0)
-		$(CTEST_BIN) --extension "$(TARGET)" --model "$(GGUF_MODEL_PATH)"
+		$(CTEST_BIN) --extension "$(TARGET)" --model "$(GGUF_MODEL_PATH)" --whisper-model "$(WHISPER_MODEL_PATH)" --audio "$(AUDIO_TEST_WAV)"
 else
 		@echo "Skipping C unit tests (SKIP_UNITTEST=$(SKIP_UNITTEST))."
 endif

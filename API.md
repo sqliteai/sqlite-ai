@@ -16,7 +16,7 @@ Returns the current version of the SQLite-AI extension.
 
 ```sql
 SELECT ai_version();
--- e.g., '0.5.1'
+-- e.g., '0.9.0'
 ```
 
 ---
@@ -706,12 +706,118 @@ SELECT llm_chat_restore('b59e...');
 
 **Description:**
 Generates a context-aware reply using chat memory, returned as a single, complete response.
-For a streams model reply, use the llm_chat virtual table.
+For a streaming model reply, use the llm_chat virtual table.
 
 **Example:**
 
 ```sql
 SELECT llm_chat_respond('What are the most visited cities in Italy?');
+```
+
+---
+
+## `llm_chat_system_prompt(text TEXT)`
+
+**Returns:** `TEXT` or `NULL`
+
+**Description:**
+Gets or sets the system prompt for chat sessions. When called without arguments, returns the current system prompt (or `NULL` if none is set). When called with a text argument, sets the system prompt and returns `NULL`. The system prompt is automatically prepended as a system-role message at the beginning of chat conversations.
+
+**Example:**
+
+```sql
+-- Set a system prompt
+SELECT llm_chat_system_prompt('You are a helpful assistant that speaks Italian.');
+
+-- Get the current system prompt
+SELECT llm_chat_system_prompt();
+```
+
+---
+
+## Audio Functions
+
+### `audio_model_load(path TEXT, options TEXT)`
+
+**Returns:** `NULL`
+
+**Description:**
+Loads a Whisper model from the specified file path with optional comma-separated key=value configuration. The model is used for audio transcription via `audio_model_transcribe`. Only one whisper model can be loaded at a time per connection.
+
+**Example:**
+
+```sql
+-- Load with defaults
+SELECT audio_model_load('./models/ggml-tiny.bin');
+
+-- Load with options
+SELECT audio_model_load('./models/ggml-base.bin', 'gpu_layers=0');
+```
+
+---
+
+### `audio_model_free()`
+
+**Returns:** `NULL`
+
+**Description:**
+Unloads the current Whisper model and frees associated memory.
+
+**Example:**
+
+```sql
+SELECT audio_model_free();
+```
+
+---
+
+### `audio_model_transcribe(input TEXT/BLOB, options TEXT)`
+
+**Returns:** `TEXT`
+
+**Description:**
+Transcribes audio to text using the loaded Whisper model. The input can be either:
+- **TEXT**: A file path to an audio file (WAV, MP3, or FLAC)
+- **BLOB**: Raw audio data (format auto-detected from magic bytes)
+
+An optional second parameter accepts comma-separated key=value pairs to configure transcription behavior.
+
+Supported audio formats: WAV, MP3, FLAC. Audio is automatically converted to mono 16kHz PCM as required by Whisper.
+
+**Transcription options:**
+
+| Key                | Type     | Default | Meaning                                                    |
+| ------------------ | -------- | ------- | ---------------------------------------------------------- |
+| `language`         | `text`   | `en`    | Language code (e.g., `en`, `it`, `fr`, `de`).              |
+| `translate`        | `1 or 0` | `0`    | Translate to English.                                      |
+| `n_threads`        | `number` | `4`     | Number of threads for decoding.                            |
+| `offset_ms`        | `number` | `0`     | Start transcription at this offset (milliseconds).         |
+| `duration_ms`      | `number` | `0`     | Transcribe only this duration (0 = full audio).            |
+| `no_timestamps`    | `1 or 0` | `0`    | Suppress timestamps in output.                             |
+| `single_segment`   | `1 or 0` | `0`    | Force single segment output.                               |
+| `token_timestamps` | `1 or 0` | `0`    | Enable token-level timestamps.                             |
+| `initial_prompt`   | `text`   |         | Initial prompt to guide the model.                         |
+| `temperature`      | `float`  | `0.0`   | Sampling temperature.                                      |
+| `beam_size`        | `number` | `-1`    | Beam search size (-1 = use default).                       |
+| `audio_ctx`        | `number` | `0`     | Audio context size (0 = use default).                      |
+| `suppress_regex`   | `text`   |         | Regex pattern for suppressing tokens.                      |
+| `max_len`          | `number` | `0`     | Maximum segment length in characters (0 = no limit).       |
+| `print_timestamps` | `1 or 0` | `0`    | Include timestamps in transcribed text.                    |
+
+**Examples:**
+
+```sql
+-- Transcribe from a file path
+SELECT audio_model_transcribe('./audio/speech.wav');
+
+-- Transcribe from a BLOB column
+SELECT audio_model_transcribe(audio_data) FROM recordings WHERE id = 1;
+
+-- Transcribe with options
+SELECT audio_model_transcribe('./audio/speech.mp3', 'language=it,translate=1');
+
+-- Transcribe a single segment with no timestamps
+SELECT audio_model_transcribe('./audio/clip.flac', 'single_segment=1,no_timestamps=1');
 ```
 
 ---

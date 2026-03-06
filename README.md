@@ -10,9 +10,77 @@
 * **Full On-Device Support**: Works on iOS, Android, Linux, macOS, and Windows.
 * **Offline-First**: No server dependencies or internet connection required.
 * **Composable SQL Interface**: AI + relational logic in a single unified layer.
+* **Audio Transcription**: Speech-to-text via Whisper models (WAV, MP3, FLAC).
 * **Supports any GGUF model**: available on Huggingface; Qwen, Gemma, Llama, DeepSeek and more
 
-SQLite-AI supports **text embedding generation** for search and classification, a **chat-like interface with history and token streaming**, and **automatic context save and restore** across sessions — making it ideal for building conversational agents and memory-aware assistants. Support for **multimodal** (sound and image understanding) is coming soon, bringing even richer on-device intelligence.
+SQLite-AI supports **text embedding generation** for search and classification, a **chat-like interface with history and token streaming**, **automatic context save and restore** across sessions, and **audio transcription** via Whisper models — making it ideal for building conversational agents, memory-aware assistants, and voice-enabled applications.
+
+## Getting Started
+
+```bash
+# Start SQLite CLI
+sqlite3 myapp.db
+```
+
+```sql
+-- Load the extension
+.load ./ai
+
+-- Load a GGUF model
+SELECT llm_model_load('./models/llama.gguf', 'gpu_layers=99');
+```
+
+### Text Generation
+
+```sql
+-- Create a text generation context
+SELECT llm_context_create_textgen();
+
+-- Generate text
+SELECT llm_text_generate('What is the most beautiful city in Italy?');
+```
+
+### Embedding Generation
+
+```sql
+-- Create an embedding context
+SELECT llm_context_create_embedding('embedding_type=FLOAT32');
+
+-- Generate an embedding vector
+SELECT llm_embed_generate('Hello world');
+
+-- Generate an embedding as JSON
+SELECT llm_embed_generate('Hello world', 'json_output=1');
+```
+
+### Chat
+
+```sql
+-- Create a chat context
+SELECT llm_context_create_chat();
+
+-- Send a message and get a complete response
+SELECT llm_chat_respond('Tell me a joke.');
+
+-- Or stream the reply token by token
+SELECT reply FROM llm_chat('Tell me another joke.');
+```
+
+### Audio Transcription
+
+```sql
+-- Load a Whisper model
+SELECT audio_model_load('./models/ggml-tiny.bin');
+
+-- Transcribe from a file path
+SELECT audio_model_transcribe('./audio/speech.wav');
+
+-- Transcribe with options
+SELECT audio_model_transcribe('./audio/speech.mp3', 'language=it,translate=1');
+
+-- Transcribe from a BLOB column
+SELECT audio_model_transcribe(audio_data) FROM recordings WHERE id = 1;
+```
 
 ## Documentation
 
@@ -116,26 +184,6 @@ print(db.select('SELECT ai_version()'));
 ```
 
 For a complete example, see the [Flutter example](https://github.com/sqliteai/sqlite-extensions-guide/blob/main/examples/flutter/README.md).
-
-## Getting Started
-
-Here's a quick example to get started with SQLite Sync:
-
-```bash
-# Start SQLite CLI
-sqlite3 myapp.db
-```
-
-```sql
--- Load the extension
-.load ./ai
-
--- Load a model
-SELECT llm_model_load('models/llama-2-7b.gguf', 'context_size=4096,n_gpu_layers=99');
-
--- Run inference
-SELECT llm_text_generate('What is the most beautiful city in Italy?');
-```
 
 ## 📦 Integrations
 

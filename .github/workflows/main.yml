@@ -15,44 +15,91 @@ env:
   GGUF_MODEL_DIR: tests/models/unsloth/gemma-3-270m-it-GGUF
   GGUF_MODEL_NAME: gemma-3-270m-it-UD-IQ2_M.gguf
   GGUF_MODEL_URL: https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-UD-IQ2_M.gguf
+  WHISPER_MODEL_DIR: tests/models/ggerganov/whisper-tiny
+  WHISPER_MODEL_NAME: ggml-tiny.bin
+  WHISPER_MODEL_URL: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+  AUDIO_TEST_DIR: tests/audio
+  AUDIO_TEST_WAV: tests/audio/jfk.wav
+  AUDIO_TEST_WAV_URL: https://github.com/ggml-org/whisper.cpp/raw/master/samples/jfk.wav
 
 jobs:
-  download-model:
+  download-models:
     outputs:
-      cache-key: gguf-${{ steps.meta.outputs.hash }}
-      model-path: ${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}
-    name: Download GGUF model
+      gguf-cache-key: gguf-${{ steps.meta.outputs.gguf-hash }}
+      gguf-model-path: ${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}
+      whisper-cache-key: whisper-${{ steps.meta.outputs.whisper-hash }}
+      whisper-model-path: ${{ env.WHISPER_MODEL_DIR }}/${{ env.WHISPER_MODEL_NAME }}
+      audio-cache-key: audio-${{ steps.meta.outputs.audio-hash }}
+      audio-test-path: ${{ env.AUDIO_TEST_WAV }}
+    name: Download models and test assets
     runs-on: ubuntu-22.04
     steps:
-      - name: Compute model URL hash
+      - name: Compute URL hashes
         id: meta
         run: |
           if command -v sha256sum >/dev/null 2>&1; then
-            hash=$(echo -n "${{ env.GGUF_MODEL_URL }}" | sha256sum | cut -d' ' -f1)
+            gguf_hash=$(echo -n "${{ env.GGUF_MODEL_URL }}" | sha256sum | cut -d' ' -f1)
+            whisper_hash=$(echo -n "${{ env.WHISPER_MODEL_URL }}" | sha256sum | cut -d' ' -f1)
+            audio_hash=$(echo -n "${{ env.AUDIO_TEST_WAV_URL }}" | sha256sum | cut -d' ' -f1)
           else
-            hash=$(echo -n "${{ env.GGUF_MODEL_URL }}" | shasum -a 256 | cut -d' ' -f1)
+            gguf_hash=$(echo -n "${{ env.GGUF_MODEL_URL }}" | shasum -a 256 | cut -d' ' -f1)
+            whisper_hash=$(echo -n "${{ env.WHISPER_MODEL_URL }}" | shasum -a 256 | cut -d' ' -f1)
+            audio_hash=$(echo -n "${{ env.AUDIO_TEST_WAV_URL }}" | shasum -a 256 | cut -d' ' -f1)
           fi
-          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+          echo "gguf-hash=$gguf_hash" >> "$GITHUB_OUTPUT"
+          echo "whisper-hash=$whisper_hash" >> "$GITHUB_OUTPUT"
+          echo "audio-hash=$audio_hash" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare model directory
-        run: mkdir -p "${{ env.GGUF_MODEL_DIR }}"
+      - name: Prepare directories
+        run: |
+          mkdir -p "${{ env.GGUF_MODEL_DIR }}"
+          mkdir -p "${{ env.WHISPER_MODEL_DIR }}"
+          mkdir -p "${{ env.AUDIO_TEST_DIR }}"
 
       - name: Restore GGUF cache
-        id: cache
+        id: cache-gguf
         uses: actions/cache@v4
         with:
           path: ${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}
-          key: gguf-${{ steps.meta.outputs.hash }}
+          key: gguf-${{ steps.meta.outputs.gguf-hash }}
 
       - name: Download GGUF model
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          curl -L --fail --retry 3 "${{ env.GGUF_MODEL_URL }}" -o "${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}"
+        if: steps.cache-gguf.outputs.cache-hit != 'true'
+        run: curl -L --fail --retry 3 "${{ env.GGUF_MODEL_URL }}" -o "${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}"
+
       - name: Verify GGUF model
         run: test -f "${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}"
 
+      - name: Restore Whisper cache
+        id: cache-whisper
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WHISPER_MODEL_DIR }}/${{ env.WHISPER_MODEL_NAME }}
+          key: whisper-${{ steps.meta.outputs.whisper-hash }}
+
+      - name: Download Whisper model
+        if: steps.cache-whisper.outputs.cache-hit != 'true'
+        run: curl -L --fail --retry 3 "${{ env.WHISPER_MODEL_URL }}" -o "${{ env.WHISPER_MODEL_DIR }}/${{ env.WHISPER_MODEL_NAME }}"
+
+      - name: Verify Whisper model
+        run: test -f "${{ env.WHISPER_MODEL_DIR }}/${{ env.WHISPER_MODEL_NAME }}"
+
+      - name: Restore audio test file cache
+        id: cache-audio
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.AUDIO_TEST_WAV }}
+          key: audio-${{ steps.meta.outputs.audio-hash }}
+
+      - name: Download audio test file
+        if: steps.cache-audio.outputs.cache-hit != 'true'
+        run: curl -L --fail --retry 3 "${{ env.AUDIO_TEST_WAV_URL }}" -o "${{ env.AUDIO_TEST_WAV }}"
+
+      - name: Verify audio test file
+        run: test -f "${{ env.AUDIO_TEST_WAV }}"
+
   build:
-    needs: download-model
+    needs: download-models
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container && matrix.container || '' }}
     name: ${{ matrix.name }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }} build${{ matrix.arch != 'arm64-v8a' && matrix.name != 'ios-sim' && matrix.name != 'ios' && matrix.name != 'apple-xcframework' && matrix.name != 'android-aar' && ( matrix.name != 'macos' || matrix.arch != 'x86_64' ) && ' + test' || ''}}
@@ -150,14 +197,29 @@ jobs:
         with:
           submodules: true
 
-      - name: Prepare GGUF model directory
-        run: mkdir -p "${{ env.GGUF_MODEL_DIR }}"
+      - name: Prepare test asset directories
+        run: |
+          mkdir -p "${{ env.GGUF_MODEL_DIR }}"
+          mkdir -p "${{ env.WHISPER_MODEL_DIR }}"
+          mkdir -p "${{ env.AUDIO_TEST_DIR }}"
 
       - name: Restore GGUF cache
         uses: actions/cache@v4
         with:
-          path: ${{ needs.download-model.outputs.model-path }}
-          key: ${{ needs.download-model.outputs.cache-key }}
+          path: ${{ needs.download-models.outputs.gguf-model-path }}
+          key: ${{ needs.download-models.outputs.gguf-cache-key }}
+
+      - name: Restore Whisper cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ needs.download-models.outputs.whisper-model-path }}
+          key: ${{ needs.download-models.outputs.whisper-cache-key }}
+
+      - name: Restore audio test file cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ needs.download-models.outputs.audio-test-path }}
+          key: ${{ needs.download-models.outputs.audio-cache-key }}
 
       - name: android setup java
         if: matrix.name == 'android-aar'

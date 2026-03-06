@@ -48,11 +48,11 @@ void buffer_destroy (buffer_t *b);
 
 char *ai_uuid_v7_string (char value[UUID_STR_MAXLEN], bool dash_format);
 
-float *audio_wav_file2pcm (const char *wav_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels);
-float *audio_wav_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels);
-float *audio_flac_file2pcm (const char *flac_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels);
-float *audio_flac_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels);
-float *audio_mp3_file2pcm (const char *mp3_path, uint64_t *num_samples, uint32_t *sample_rate, uint16_t *channels);
+float *audio_wav_file2pcm (const char *wav_path, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels);
+float *audio_wav_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels);
+float *audio_flac_file2pcm (const char *flac_path, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels);
+float *audio_flac_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels);
+float *audio_mp3_file2pcm (const char *mp3_path, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels);
 float *audio_mp3_mem2pcm (const void *data, size_t data_size, uint64_t *num_samples, uint32_t *sample_rate, uint32_t *channels);
 int    audio_list_devices (void *xdata, audio_list_devices_callback input_devices_cb, audio_list_devices_callback output_devices_cb);
 
