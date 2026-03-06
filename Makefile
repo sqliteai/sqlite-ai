@@ -59,7 +59,7 @@ SKIP_UNITTEST ?= 0
 CC = gcc
 CXX = g++
 CFLAGS = -Wall -Wextra -Wno-unused-parameter -I$(SRC_DIR) -I$(BUILD_GGML)/include -I$(WHISPER_DIR)/include -I$(MINIAUDIO_DIR)
-LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
+LLAMA_OPTIONS = $(LLAMA) -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_COMMON=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_RPC=OFF
 WHISPER_OPTIONS = $(LLAMA) $(WHISPER) -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DWHISPER_RPC=OFF -DWHISPER_USE_SYSTEM_GGML=ON
 MINIAUDIO_OPTIONS = $(MINIAUDIO) -DBUILD_SHARED_LIBS=OFF -DMINIAUDIO_BUILD_EXAMPLES=OFF -DMINIAUDIO_BUILD_TESTS=OFF
 # MinGW produces .a files without lib prefix, use -l:filename.a syntax
@@ -69,7 +69,7 @@ ifeq ($(PLATFORM),windows)
 else
 	L = -l
 endif
-LLAMA_LDFLAGS = -L./$(BUILD_LLAMA)/common -L./$(BUILD_GGML)/lib -L./$(BUILD_LLAMA)/src -lcommon -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
+LLAMA_LDFLAGS = -L./$(BUILD_GGML)/lib -L./$(BUILD_LLAMA)/src -lllama $(L)ggml$(A) $(L)ggml-base$(A) $(L)ggml-cpu$(A)
 WHISPER_LDFLAGS = -L./$(BUILD_WHISPER)/src -lwhisper
 MINIAUDIO_LDFLAGS = -L./$(BUILD_MINIAUDIO) -lminiaudio -lminiaudio_channel_combiner_node -lminiaudio_channel_separator_node -lminiaudio_ltrim_node -lminiaudio_reverb_node -lminiaudio_vocoder_node
 LDFLAGS = $(LLAMA_LDFLAGS) $(WHISPER_LDFLAGS) $(MINIAUDIO_LDFLAGS)
@@ -85,7 +85,7 @@ SQLITE_TEST_SRC = tests/c/sqlite3.c
 # Files
 SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 OBJ_FILES = $(patsubst %.c, $(BUILD_DIR)/%.o, $(notdir $(SRC_FILES)))
-LLAMA_LIBS = $(BUILD_LLAMA)/common/libcommon.a $(BUILD_GGML)/libggml.a $(BUILD_GGML)/libggml-base.a $(BUILD_GGML)/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
+LLAMA_LIBS = $(BUILD_GGML)/libggml.a $(BUILD_GGML)/libggml-base.a $(BUILD_GGML)/libggml-cpu.a $(BUILD_LLAMA)/src/libllama.a
 WHISPER_LIBS = $(BUILD_WHISPER)/src/libwhisper.a
 MINIAUDIO_LIBS = $(BUILD_MINIAUDIO)/libminiaudio.a
 
