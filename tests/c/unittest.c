@@ -1812,6 +1812,120 @@ fail:
     return 1;
 }
 
+static int test_llm_chat_double_save(const test_env *env) {
+    sqlite3 *db = NULL;
+    bool model_loaded = false;
+    bool context_created = false;
+    bool chat_created = false;
+    int status = 1;
+    
+    if (open_db_and_load(env, &db) != SQLITE_OK) {
+        goto done;
+    }
+    
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0)
+        goto done;
+    model_loaded = true;
+    
+    if (exec_expect_ok(env, db,
+                       "SELECT llm_context_create('context_size=1000');") != 0)
+        goto done;
+    context_created = true;
+    
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0)
+        goto done;
+    chat_created = true;
+    
+    // First prompt
+    const char *prompt1 = "First prompt";
+    if (exec_expect_ok(env, db, "SELECT llm_chat_respond('First prompt');") != 0)
+        goto done;
+    
+    // First save
+    if (exec_expect_ok(env, db, "SELECT llm_chat_save();") != 0)
+        goto done;
+    
+    // Second prompt
+    const char *prompt2 = "Second prompt";
+    if (exec_expect_ok(env, db, "SELECT llm_chat_respond('Second prompt');") != 0)
+        goto done;
+    
+    // Second save
+    if (exec_expect_ok(env, db, "SELECT llm_chat_save();") != 0)
+        goto done;
+    
+    ai_chat_message_row rows[8];
+    int count = 0;
+    // We expect 4 messages: User1, Assistant1, User2, Assistant2
+    if (fetch_ai_chat_messages(env, db, rows, 8, &count) != 0)
+        goto done;
+    
+    if (count != 5) {
+        fprintf(stderr,
+                "[test_llm_chat_double_save] expected 4 message rows, got %d\n",
+                count);
+        goto done;
+    }
+    
+    // Verify order and roles
+    if (strcmp(rows[0].role, "system") != 0 ||
+        strcmp(rows[0].content, "") != 0) {
+        fprintf(stderr,
+                "[test_llm_chat_double_save] row 0 mismatch (expected system/'%s', "
+                "got %s/'%s')\n",
+                "", rows[0].role, rows[0].content);
+        goto done;
+    }
+    if (strcmp(rows[1].role, "user") != 0 ||
+        strcmp(rows[1].content, prompt1) != 0) {
+        fprintf(stderr,
+                "[test_llm_chat_double_save] row 0 mismatch (expected user/'%s', "
+                "got %s/'%s')\n",
+                prompt1, rows[1].role, rows[1].content);
+        goto done;
+    }
+    if (strcmp(rows[2].role, "assistant") != 0) {
+        fprintf(stderr,
+                "[test_llm_chat_double_save] row 1 mismatch (expected assistant, "
+                "got %s)\n",
+                rows[2].role);
+        goto done;
+    }
+    if (strcmp(rows[3].role, "user") != 0 ||
+        strcmp(rows[3].content, prompt2) != 0) {
+        fprintf(stderr,
+                "[test_llm_chat_double_save] row 2 mismatch (expected user/'%s', "
+                "got %s/'%s')\n",
+                prompt2, rows[3].role, rows[3].content);
+        goto done;
+    }
+    if (strcmp(rows[4].role, "assistant") != 0) {
+        fprintf(stderr,
+                "[test_llm_chat_double_save] row 3 mismatch (expected assistant, "
+                "got %s)\n",
+                rows[4].role);
+        goto done;
+    }
+    
+    status = 0;
+    
+done:
+    if (chat_created)
+        exec_expect_ok(env, db, "SELECT llm_chat_free();");
+    if (context_created)
+        exec_expect_ok(env, db, "SELECT llm_context_free();");
+    if (model_loaded)
+        exec_expect_ok(env, db, "SELECT llm_model_free();");
+    if (db)
+        sqlite3_close(db);
+    if (status == 0)
+        status = assert_sqlite_memory_clean("llm_chat_double_save", env);
+    return status;
+}
+
 static const test_case TESTS[] = {
     {"issue15_llm_chat_without_context", test_issue15_chat_without_context},
     {"llm_chat_respond_repeated", test_llm_chat_respond_repeated},
@@ -1844,6 +1958,7 @@ static const test_case TESTS[] = {
     {"chat_respond_auto_init", test_chat_respond_auto_init},
     {"chat_save_with_metadata", test_chat_save_with_metadata},
     {"text_generate_default_limit", test_text_generate_default_limit},
+    {"llm_chat_double_save", test_llm_chat_double_save},
     // Audio / Whisper tests
     {"audio_transcribe_no_model", test_audio_transcribe_no_model},
     {"audio_model_load_invalid_path", test_audio_model_load_invalid_path},
