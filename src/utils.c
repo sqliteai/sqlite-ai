@@ -6,6 +6,9 @@
 //
 
 #define MINIAUDIO_IMPLEMENTATION
+// Rename to avoid duplicate symbol with libmtmd.a's mtmd-helper.cpp
+// which also includes miniaudio.h (ma_atomic_global_lock is not guarded by MA_API)
+#define ma_atomic_global_lock sqlite_ai_ma_atomic_global_lock
 
 #include "utils.h"
 #include "miniaudio.h"
