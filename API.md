@@ -16,7 +16,7 @@ Returns the current version of the SQLite-AI extension.
 
 ```sql
 SELECT ai_version();
--- e.g., '0.9.0'
+-- e.g., '1.0.0'
 ```
 
 ---
@@ -608,17 +608,29 @@ SELECT llm_embed_generate('hello world', 'json_output=1');
 
 ---
 
-## `llm_text_generate(text TEXT, options TEXT)`
+## `llm_text_generate(text TEXT, [image1, image2, ...], options TEXT)`
 
 **Returns:** `TEXT`
 
 **Description:**
 Generates a full-text completion based on input, with optional configuration provided as a comma-separated list of key=value pairs.
 
-**Example:**
+When a vision model is loaded via `llm_vision_load()`, you can pass one or more images as additional arguments. Images can be file paths (TEXT) or raw image data (BLOB). Supported image formats: JPG, PNG, BMP, GIF.
+
+**Examples:**
 
 ```sql
+-- Text-only generation
 SELECT llm_text_generate('Once upon a time', 'n_predict=1024');
+
+-- Vision: describe an image
+SELECT llm_text_generate('Describe this image', './photos/cat.jpg');
+
+-- Vision: compare multiple images
+SELECT llm_text_generate('What is different between these images?', './img1.jpg', './img2.jpg');
+
+-- Vision: image from BLOB column
+SELECT llm_text_generate('What do you see?', image_data) FROM photos WHERE id = 1;
 ```
 
 ---
@@ -700,7 +712,7 @@ SELECT llm_chat_restore('b59e...');
 
 ---
 
-## `llm_chat_respond(text TEXT)`
+## `llm_chat_respond(text TEXT, [image1, image2, ...])`
 
 **Returns:** `TEXT`
 
@@ -708,10 +720,19 @@ SELECT llm_chat_restore('b59e...');
 Generates a context-aware reply using chat memory, returned as a single, complete response.
 For a streaming model reply, use the llm_chat virtual table.
 
-**Example:**
+When a vision model is loaded via `llm_vision_load()`, you can pass one or more images as additional arguments. Images can be file paths (TEXT) or raw image data (BLOB). Supported image formats: JPG, PNG, BMP, GIF.
+
+**Examples:**
 
 ```sql
+-- Text-only chat
 SELECT llm_chat_respond('What are the most visited cities in Italy?');
+
+-- Vision: ask about an image
+SELECT llm_chat_respond('What is in this photo?', './photos/landscape.jpg');
+
+-- Vision: multiple images
+SELECT llm_chat_respond('Compare these two charts', './chart1.png', './chart2.png');
 ```
 
 ---
@@ -731,6 +752,59 @@ SELECT llm_chat_system_prompt('You are a helpful assistant that speaks Italian.'
 
 -- Get the current system prompt
 SELECT llm_chat_system_prompt();
+```
+
+---
+
+## Vision Functions
+
+### `llm_vision_load(path TEXT, options TEXT)`
+
+**Returns:** `NULL`
+
+**Description:**
+Loads a multimodal projector (mmproj) model for vision capabilities. This requires a text model to already be loaded via `llm_model_load()`. The mmproj file is a separate GGUF file that contains the vision encoder and projector weights.
+
+Once loaded, vision capabilities are available through `llm_text_generate()` and `llm_chat_respond()` by passing image arguments.
+
+The following option keys are available:
+
+| Key                | Type                              | Default | Meaning                                                              |
+| ------------------ | --------------------------------- | ------- | -------------------------------------------------------------------- |
+| `use_gpu`          | `1 or 0`                          | `1`     | Use GPU for vision encoding.                                         |
+| `n_threads`        | `number`                          | `4`     | Number of threads for vision processing.                             |
+| `warmup`           | `1 or 0`                          | `1`     | Run a warmup pass on load for faster first use.                      |
+| `flash_attn_type`  | `auto, disabled, enabled`         | `auto`  | Controls Flash Attention for the vision encoder.                     |
+| `image_min_tokens` | `number`                          | `0`     | Minimum image tokens for dynamic resolution models (0 = from model). |
+| `image_max_tokens` | `number`                          | `0`     | Maximum image tokens for dynamic resolution models (0 = from model). |
+
+**Example:**
+
+```sql
+-- Load text model first
+SELECT llm_model_load('./models/Gemma-3-4B-IT-Q4_K_M.gguf', 'gpu_layers=99');
+SELECT llm_context_create_textgen();
+
+-- Load vision projector
+SELECT llm_vision_load('./models/mmproj-Gemma-3-4B-IT-f16.gguf');
+
+-- Now use vision with llm_text_generate or llm_chat_respond
+SELECT llm_text_generate('Describe this image', './photos/cat.jpg');
+```
+
+---
+
+### `llm_vision_free()`
+
+**Returns:** `NULL`
+
+**Description:**
+Unloads the current vision (mmproj) model and frees associated memory. The text model remains loaded.
+
+**Example:**
+
+```sql
+SELECT llm_vision_free();
 ```
 
 ---

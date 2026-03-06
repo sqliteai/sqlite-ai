@@ -1860,53 +1860,46 @@ static int test_llm_chat_double_save(const test_env *env) {
     ai_chat_message_row rows[8];
     int count = 0;
     // We expect 4 messages: User1, Assistant1, User2, Assistant2
+    // (empty system prompt is skipped during save)
     if (fetch_ai_chat_messages(env, db, rows, 8, &count) != 0)
         goto done;
-    
-    if (count != 5) {
+
+    if (count != 4) {
         fprintf(stderr,
                 "[test_llm_chat_double_save] expected 4 message rows, got %d\n",
                 count);
         goto done;
     }
-    
+
     // Verify order and roles
-    if (strcmp(rows[0].role, "system") != 0 ||
-        strcmp(rows[0].content, "") != 0) {
-        fprintf(stderr,
-                "[test_llm_chat_double_save] row 0 mismatch (expected system/'%s', "
-                "got %s/'%s')\n",
-                "", rows[0].role, rows[0].content);
-        goto done;
-    }
-    if (strcmp(rows[1].role, "user") != 0 ||
-        strcmp(rows[1].content, prompt1) != 0) {
+    if (strcmp(rows[0].role, "user") != 0 ||
+        strcmp(rows[0].content, prompt1) != 0) {
         fprintf(stderr,
                 "[test_llm_chat_double_save] row 0 mismatch (expected user/'%s', "
                 "got %s/'%s')\n",
-                prompt1, rows[1].role, rows[1].content);
+                prompt1, rows[0].role, rows[0].content);
         goto done;
     }
-    if (strcmp(rows[2].role, "assistant") != 0) {
+    if (strcmp(rows[1].role, "assistant") != 0) {
         fprintf(stderr,
                 "[test_llm_chat_double_save] row 1 mismatch (expected assistant, "
                 "got %s)\n",
-                rows[2].role);
+                rows[1].role);
         goto done;
     }
-    if (strcmp(rows[3].role, "user") != 0 ||
-        strcmp(rows[3].content, prompt2) != 0) {
+    if (strcmp(rows[2].role, "user") != 0 ||
+        strcmp(rows[2].content, prompt2) != 0) {
         fprintf(stderr,
                 "[test_llm_chat_double_save] row 2 mismatch (expected user/'%s', "
                 "got %s/'%s')\n",
-                prompt2, rows[3].role, rows[3].content);
+                prompt2, rows[2].role, rows[2].content);
         goto done;
     }
-    if (strcmp(rows[4].role, "assistant") != 0) {
+    if (strcmp(rows[3].role, "assistant") != 0) {
         fprintf(stderr,
                 "[test_llm_chat_double_save] row 3 mismatch (expected assistant, "
                 "got %s)\n",
-                rows[4].role);
+                rows[3].role);
         goto done;
     }
     

@@ -11,9 +11,10 @@
 * **Offline-First**: No server dependencies or internet connection required.
 * **Composable SQL Interface**: AI + relational logic in a single unified layer.
 * **Audio Transcription**: Speech-to-text via Whisper models (WAV, MP3, FLAC).
+* **Vision / Multimodal**: Analyze images via multimodal models (JPG, PNG, BMP, GIF).
 * **Supports any GGUF model**: available on Huggingface; Qwen, Gemma, Llama, DeepSeek and more
 
-SQLite-AI supports **text embedding generation** for search and classification, a **chat-like interface with history and token streaming**, **automatic context save and restore** across sessions, and **audio transcription** via Whisper models — making it ideal for building conversational agents, memory-aware assistants, and voice-enabled applications.
+SQLite-AI supports **text embedding generation** for search and classification, a **chat-like interface with history and token streaming**, **automatic context save and restore** across sessions, **audio transcription** via Whisper models, and **vision/multimodal** image understanding — making it ideal for building conversational agents, memory-aware assistants, and voice-enabled applications.
 
 ## Getting Started
 
@@ -80,6 +81,25 @@ SELECT audio_model_transcribe('./audio/speech.mp3', 'language=it,translate=1');
 
 -- Transcribe from a BLOB column
 SELECT audio_model_transcribe(audio_data) FROM recordings WHERE id = 1;
+```
+
+### Vision / Multimodal
+
+```sql
+-- Load a multimodal model and its vision projector
+SELECT llm_model_load('./models/Gemma-3-4B-IT-Q4_K_M.gguf', 'gpu_layers=99');
+SELECT llm_context_create_textgen();
+SELECT llm_vision_load('./models/mmproj-Gemma-3-4B-IT-f16.gguf');
+
+-- Describe an image
+SELECT llm_text_generate('Describe this image', './photos/cat.jpg');
+
+-- Use vision in a chat conversation
+SELECT llm_context_create_chat();
+SELECT llm_chat_respond('What do you see in this photo?', './photos/landscape.jpg');
+
+-- Analyze multiple images
+SELECT llm_text_generate('Compare these two images', './img1.jpg', './img2.jpg');
 ```
 
 ## Documentation

@@ -17,6 +17,8 @@
 #include "utils.h"
 #include "llama.h"
 #include "whisper.h"
+#include "mtmd.h"
+#include "mtmd-helper.h"
 #include "sqlite-ai.h"
 #include "fp16/fp16.h"
 
@@ -161,6 +163,9 @@ typedef struct {
     
     // whisper
     struct whisper_context      *whisper;
+
+    // vision (mtmd)
+    mtmd_context                *vision;
     
     // chat
     struct {
@@ -214,6 +219,12 @@ typedef enum {
     AI_MODEL_IS_RECURRENT,
     AI_MODEL_CHAT_TEMPLATE
 } ai_model_setting;
+
+// Forward declarations for vision functions
+static void llm_text_run_vision(sqlite3_context *context, const char *text, int32_t text_len,
+                                sqlite3_value **images, int n_images);
+static void llm_chat_respond_vision(sqlite3_context *context, ai_context *ai,
+                                    const char *user_prompt, sqlite3_value **images, int n_images);
 
 const char *ROLE_SYSTEM    = "system";
 const char *ROLE_USER       = "user";
@@ -818,6 +829,8 @@ static void ai_free (void *ctx, bool free_ai, bool free_llm, bool free_audio) {
     }
     
     if (free_llm) {
+        if (ai->vision) mtmd_free(ai->vision);
+        ai->vision = NULL;
         memset(ai->lora, 0, sizeof(struct llama_adapter_lora *)*MAX_LORAS);
         memset(ai->lora_scale, 0, sizeof(float)*MAX_LORAS);
         if (ai->ctx) llama_set_adapters_lora(ai->ctx, NULL, 0, NULL);
@@ -1666,21 +1679,55 @@ error:
 
 static void llm_text_generate (sqlite3_context *context, int argc, sqlite3_value **argv) {
     if (llm_check_context(context) == false) return;
-    if (llm_common_args_check(context, "llm_text_generate", argc, argv, true) == false) return;
-    
+
+    if (argc < 1 || sqlite3_value_type(argv[0]) != SQLITE_TEXT) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "llm_text_generate requires at least one TEXT argument (prompt)");
+        return;
+    }
+
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (!ai->model) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "No model loaded");
+        return;
+    }
+
     const char *text = (const char *)sqlite3_value_text(argv[0]);
     int32_t text_len = (int32_t)sqlite3_value_bytes(argv[0]);
-    const char *options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
-    
-    // passing NULL as xdata because context has been already created
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (!text || text_len == 0) return;
+
+    // parse remaining args: TEXT with '=' is options, TEXT without '=' or BLOB is an image
+    const char *options = NULL;
+    sqlite3_value *image_args[64];
+    int n_images = 0;
+
+    for (int i = 1; i < argc; i++) {
+        int type = sqlite3_value_type(argv[i]);
+        if (type == SQLITE_NULL) continue;
+        if (type == SQLITE_TEXT && !options) {
+            const char *val = (const char *)sqlite3_value_text(argv[i]);
+            if (val && strchr(val, '=')) {
+                options = val;
+                continue;
+            }
+        }
+        if (n_images < 64) image_args[n_images++] = argv[i];
+    }
+
+    // apply options if any
     if (parse_keyvalue_string(ai, options, llm_context_options_callback, NULL) == false) {
         sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
         return;
     }
-        
-    if (!text || text_len == 0) return;
-    llm_text_run(context, text, text_len);
+
+    if (n_images > 0) {
+        if (!ai->vision) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Images provided but no vision model loaded. Call llm_vision_load() first.");
+            return;
+        }
+        llm_text_run_vision(context, text, text_len, image_args, n_images);
+    } else {
+        llm_text_run(context, text, text_len);
+    }
 }
 
 // MARK: - Chat -
@@ -2263,20 +2310,44 @@ abort_restore:
 
 static void llm_chat_respond (sqlite3_context *context, int argc, sqlite3_value **argv) {
     if (llm_check_context(context) == false) return;
-    
-    int types[] = {SQLITE_TEXT};
-    if (sqlite_sanity_function(context, "llm_chat_respond", argc, argv, 1, types, true, false) == false) return;
-    
+
+    if (argc < 1 || sqlite3_value_type(argv[0]) != SQLITE_TEXT) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "llm_chat_respond requires at least one TEXT argument (prompt)");
+        return;
+    }
+
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (!ai->model) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "No model loaded");
+        return;
+    }
     if (llm_chat_check_context(ai) == false) return;
-    
+
     const char *user_prompt = (const char *)sqlite3_value_text(argv[0]);
     ai->context = context;
     ai->vtab = NULL;
-    
+
     ai->chat.token_count = 0;
     buffer_reset(&ai->chat.response);
-    llm_chat_run(ai, NULL, user_prompt);
+
+    // collect image args (argv[1..n], skip NULLs)
+    sqlite3_value *image_args[64];
+    int n_images = 0;
+    for (int i = 1; i < argc; i++) {
+        int type = sqlite3_value_type(argv[i]);
+        if (type == SQLITE_NULL) continue;
+        if (n_images < 64) image_args[n_images++] = argv[i];
+    }
+
+    if (n_images > 0) {
+        if (!ai->vision) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Images provided but no vision model loaded. Call llm_vision_load() first.");
+            return;
+        }
+        llm_chat_respond_vision(context, ai, user_prompt, image_args, n_images);
+    } else {
+        llm_chat_run(ai, NULL, user_prompt);
+    }
 }
 
 static void llm_chat_system_prompt(sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -2902,6 +2973,441 @@ static void llm_model_chat_template (sqlite3_context *context, int argc, sqlite3
     llm_model_get_setting(context, argc, argv, AI_MODEL_CHAT_TEMPLATE);
 }
 
+// MARK: - Vision -
+
+#define OPTION_KEY_VISION_USE_GPU           "use_gpu"
+#define OPTION_KEY_VISION_N_THREADS         "n_threads"
+#define OPTION_KEY_VISION_WARMUP            "warmup"
+#define OPTION_KEY_VISION_IMAGE_MIN_TOKENS  "image_min_tokens"
+#define OPTION_KEY_VISION_IMAGE_MAX_TOKENS  "image_max_tokens"
+
+static bool llm_vision_options_callback (void *ctx, void *xdata, const char *key, int key_len, const char *value, int value_len) {
+    struct mtmd_context_params *params = (struct mtmd_context_params *)xdata;
+    char buffer[256];
+    int len = (value_len < (int)sizeof(buffer) - 1) ? value_len : (int)sizeof(buffer) - 1;
+    memcpy(buffer, value, len);
+    buffer[len] = '\0';
+
+    if (KEY_MATCHES(key, key_len, OPTION_KEY_VISION_USE_GPU)) params->use_gpu = (atoi(value) != 0);
+    else if (KEY_MATCHES(key, key_len, OPTION_KEY_VISION_N_THREADS)) params->n_threads = atoi(value);
+    else if (KEY_MATCHES(key, key_len, OPTION_KEY_VISION_WARMUP)) params->warmup = (atoi(value) != 0);
+    else if (KEY_MATCHES(key, key_len, OPTION_KEY_VISION_IMAGE_MIN_TOKENS)) params->image_min_tokens = atoi(value);
+    else if (KEY_MATCHES(key, key_len, OPTION_KEY_VISION_IMAGE_MAX_TOKENS)) params->image_max_tokens = atoi(value);
+    else if (KEY_MATCHES(key, key_len, OPTION_KEY_FLASH_ATTN_TYPE)) {
+        if (strcasecmp(buffer, "auto") == 0) params->flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
+        else if (strcasecmp(buffer, "disabled") == 0) params->flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+        else if (strcasecmp(buffer, "enabled") == 0) params->flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    }
+    return true;
+}
+
+static void llm_vision_load (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    if (llm_common_args_check(context, "llm_vision_load", argc, argv, false) == false) return;
+
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (!ai->model) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "No model loaded. Call llm_model_load() before llm_vision_load().");
+        return;
+    }
+
+    const char *path = (const char *)sqlite3_value_text(argv[0]);
+    const char *options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
+
+    struct mtmd_context_params params = mtmd_context_params_default();
+    params.use_gpu = true;
+    params.n_threads = 4;
+    params.warmup = true;
+
+    if (parse_keyvalue_string(ai, options, llm_vision_options_callback, &params) == false) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options);
+        return;
+    }
+
+    if (ai->vision) {
+        mtmd_free(ai->vision);
+        ai->vision = NULL;
+    }
+
+    ai->vision = mtmd_init_from_file(path, ai->model, params);
+    if (!ai->vision) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Failed to load vision model from: %s", path);
+        return;
+    }
+}
+
+static void llm_vision_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (ai->vision) {
+        mtmd_free(ai->vision);
+        ai->vision = NULL;
+    }
+}
+
+// Helper: load bitmaps from sqlite3_value args (TEXT = file path, BLOB = raw data)
+static mtmd_bitmap **llm_vision_load_bitmaps (ai_context *ai, sqlite3_context *context,
+                                               sqlite3_value **images, int n_images) {
+    mtmd_bitmap **bitmaps = (mtmd_bitmap **)sqlite3_malloc64(sizeof(mtmd_bitmap *) * n_images);
+    if (!bitmaps) {
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory");
+        return NULL;
+    }
+    memset(bitmaps, 0, sizeof(mtmd_bitmap *) * n_images);
+
+    for (int i = 0; i < n_images; i++) {
+        int type = sqlite3_value_type(images[i]);
+        if (type == SQLITE_TEXT) {
+            const char *path = (const char *)sqlite3_value_text(images[i]);
+            bitmaps[i] = mtmd_helper_bitmap_init_from_file(ai->vision, path);
+        } else if (type == SQLITE_BLOB) {
+            const void *data = sqlite3_value_blob(images[i]);
+            int len = sqlite3_value_bytes(images[i]);
+            bitmaps[i] = mtmd_helper_bitmap_init_from_buf(ai->vision, (const unsigned char *)data, len);
+        }
+        if (!bitmaps[i]) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Failed to load image (argument %d)", i + 2);
+            for (int j = 0; j < i; j++) mtmd_bitmap_free(bitmaps[j]);
+            sqlite3_free(bitmaps);
+            return NULL;
+        }
+    }
+    return bitmaps;
+}
+
+// Helper: build prompt text with <__media__> markers prepended for each image
+static char *llm_vision_build_prompt (const char *text, int32_t text_len, int n_images, int32_t *out_len) {
+    const char *marker = mtmd_default_marker();
+    size_t marker_len = strlen(marker);
+    size_t total = text_len + (marker_len + 1) * n_images + 1;
+    char *prompt = (char *)sqlite3_malloc64(total);
+    if (!prompt) return NULL;
+
+    char *p = prompt;
+    for (int i = 0; i < n_images; i++) {
+        memcpy(p, marker, marker_len);
+        p += marker_len;
+        *p++ = '\n';
+    }
+    memcpy(p, text, text_len);
+    p += text_len;
+    *p = '\0';
+    *out_len = (int32_t)(p - prompt);
+    return prompt;
+}
+
+static void llm_text_run_vision (sqlite3_context *context, const char *text, int32_t text_len,
+                                  sqlite3_value **images, int n_images) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    buffer_t buffer = {0};
+    bool buffer_initialized = false;
+    char *prompt_with_markers = NULL;
+    char *formatted_prompt = NULL;
+    mtmd_bitmap **bitmaps = NULL;
+    mtmd_input_chunks *chunks = NULL;
+
+    struct llama_context *ctx = ai->ctx;
+    if (!ctx) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "No context found. Please call llm_context_create() before using this function.");
+        return;
+    }
+
+    const struct llama_vocab *vocab = llama_model_get_vocab(ai->model);
+    if (!vocab) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Failed to extract vocabulary from the model");
+        return;
+    }
+
+    // clear KV cache
+    llama_memory_t memory = llama_get_memory(ctx);
+    if (memory) llama_memory_clear(memory, true);
+
+    // build prompt with media markers
+    int32_t prompt_total_len;
+    prompt_with_markers = llm_vision_build_prompt(text, text_len, n_images, &prompt_total_len);
+    if (!prompt_with_markers) {
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory");
+        return;
+    }
+
+    // wrap with chat template if available
+    const char *final_text = prompt_with_markers;
+    const char *chat_template = llama_model_chat_template(ai->model, NULL);
+    if (chat_template) {
+        llama_chat_message messages[] = {{ ROLE_USER, prompt_with_markers }};
+        int32_t formatted_len = llama_chat_apply_template(chat_template, messages, 1, true, NULL, 0);
+        if (formatted_len > 0) {
+            formatted_prompt = (char *)sqlite3_malloc64(formatted_len + 1);
+            if (formatted_prompt) {
+                llama_chat_apply_template(chat_template, messages, 1, true, formatted_prompt, formatted_len + 1);
+                formatted_prompt[formatted_len] = '\0';
+                final_text = formatted_prompt;
+            }
+        }
+    }
+
+    // load bitmaps
+    bitmaps = llm_vision_load_bitmaps(ai, context, images, n_images);
+    if (!bitmaps) goto error;
+
+    // tokenize with mtmd
+    chunks = mtmd_input_chunks_init();
+    if (!chunks) {
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory");
+        goto error;
+    }
+
+    mtmd_input_text input_text = { final_text, true, true };
+    int32_t rc = mtmd_tokenize(ai->vision, chunks, &input_text, (const mtmd_bitmap **)bitmaps, n_images);
+    if (rc != 0) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Failed to tokenize multimodal input (error %d)", rc);
+        goto error;
+    }
+
+    // eval chunks (vision encoder + text)
+    {
+        llama_pos n_past = 0;
+        int n_batch = (int)llama_n_batch(ctx);
+        rc = mtmd_helper_eval_chunks(ai->vision, ctx, chunks, n_past, 0, n_batch, true, &n_past);
+        if (rc != 0) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Failed to evaluate multimodal prompt (error %d)", rc);
+            goto error;
+        }
+    }
+
+    // initialize sampler
+    bool sampler_already_setup = (ai->sampler != NULL);
+    struct llama_sampler *sampler = llm_sampler_check(ai);
+    if (!sampler) goto error;
+    if (!sampler_already_setup) {
+        llama_sampler_chain_add(sampler, llama_sampler_init_penalties(64, 1.1, 0, 0));
+        llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+    }
+
+    // allocate output buffer
+    if (!buffer_create(&buffer, 0)) {
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory");
+        goto error_sampler;
+    }
+    buffer_initialized = true;
+
+    // generate tokens
+    {
+        int n_predict = (ai->options.n_predict > 0) ? ai->options.n_predict : 4096;
+        for (int i = 0; i < n_predict; i++) {
+            llama_token new_token_id = llama_sampler_sample(sampler, ctx, -1);
+            if (llama_vocab_is_eog(vocab, new_token_id)) break;
+
+            char buf[MAX_TOKEN_TEXT_LEN];
+            int n = llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
+            if (n < 0) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to convert token to piece");
+                goto error_sampler;
+            }
+
+            if (!buffer_append(&buffer, buf, n, true)) {
+                sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory");
+                goto error_sampler;
+            }
+
+            struct llama_batch batch = llama_batch_get_one(&new_token_id, 1);
+            if (llama_decode(ctx, batch)) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to decode during generation");
+                goto error_sampler;
+            }
+        }
+    }
+
+    // success
+    sqlite3_result_text(context, buffer.data, buffer.length, sqlite3_free);
+    for (int i = 0; i < n_images; i++) mtmd_bitmap_free(bitmaps[i]);
+    sqlite3_free(bitmaps);
+    mtmd_input_chunks_free(chunks);
+    sqlite3_free(prompt_with_markers);
+    sqlite3_free(formatted_prompt);
+    if (!sampler_already_setup) llama_sampler_free(sampler);
+    return;
+
+error_sampler:
+    if (!sampler_already_setup && ai->sampler) {
+        llama_sampler_free(ai->sampler);
+        ai->sampler = NULL;
+    }
+error:
+    if (buffer_initialized) buffer_destroy(&buffer);
+    if (bitmaps) {
+        for (int i = 0; i < n_images; i++) if (bitmaps[i]) mtmd_bitmap_free(bitmaps[i]);
+        sqlite3_free(bitmaps);
+    }
+    if (chunks) mtmd_input_chunks_free(chunks);
+    sqlite3_free(prompt_with_markers);
+    sqlite3_free(formatted_prompt);
+}
+
+// Vision-aware chat: non-streaming only
+static void llm_chat_respond_vision (sqlite3_context *context, ai_context *ai,
+                                      const char *user_prompt,
+                                      sqlite3_value **images, int n_images) {
+    mtmd_bitmap **bitmaps = NULL;
+    mtmd_input_chunks *chunks = NULL;
+    char *prompt_with_markers = NULL;
+
+    const char *template = llama_model_chat_template(ai->model, NULL);
+    if (!template) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Template not available");
+        return;
+    }
+
+    const struct llama_vocab *vocab = llama_model_get_vocab(ai->model);
+    if (!vocab) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Model vocab not available");
+        return;
+    }
+
+    ai->chat.vocab = vocab;
+    ai->chat.template = template;
+    ai_messages *messages = &ai->chat.messages;
+    buffer_t *formatted = &ai->chat.formatted;
+
+    // build user prompt with markers
+    int32_t prompt_total_len;
+    prompt_with_markers = llm_vision_build_prompt(user_prompt, (int32_t)strlen(user_prompt), n_images, &prompt_total_len);
+    if (!prompt_with_markers) {
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory");
+        return;
+    }
+
+    // append to message history (with markers in the text)
+    if (!llm_messages_append(messages, ROLE_USER, prompt_with_markers)) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Failed to append message");
+        goto error;
+    }
+
+    // skip empty system message if present
+    size_t messages_count = messages->count;
+    const llama_chat_message *messages_items = messages->items;
+    if (messages->count > 0) {
+        const llama_chat_message first = messages->items[0];
+        if (first.role == ROLE_SYSTEM && first.content[0] == '\0') {
+            messages_items = messages->items + 1;
+            messages_count = messages->count - 1;
+        }
+    }
+
+    // apply chat template
+    int32_t new_len = llama_chat_apply_template(template, messages_items, messages_count, true, formatted->data, formatted->capacity);
+    if (new_len > formatted->capacity) {
+        if (!buffer_resize(formatted, new_len * 2)) goto error;
+        new_len = llama_chat_apply_template(template, messages_items, messages_count, true, formatted->data, formatted->capacity);
+    }
+    if (new_len < 0 || new_len > formatted->capacity) {
+        sqlite_context_result_error(context, SQLITE_ERROR, "Failed to apply chat template");
+        goto error;
+    }
+
+    // extract new prompt text
+    {
+        int32_t prompt_len = new_len - ai->chat.prev_len;
+        if (prompt_len <= 0) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Invalid prompt length");
+            goto error;
+        }
+        int32_t current_len = (int32_t)sqlite3_msize(ai->chat.prompt);
+        if (current_len < prompt_len + 1) {
+            char *buf = (char *)sqlite3_malloc64(prompt_len + MIN_ALLOC_PROMPT);
+            if (!buf) {
+                sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory");
+                goto error;
+            }
+            if (ai->chat.prompt) sqlite3_free(ai->chat.prompt);
+            ai->chat.prompt = buf;
+        }
+        memcpy(ai->chat.prompt, formatted->data + ai->chat.prev_len, prompt_len);
+        ai->chat.prompt[prompt_len] = 0;
+    }
+
+    // load bitmaps
+    bitmaps = llm_vision_load_bitmaps(ai, context, images, n_images);
+    if (!bitmaps) goto error;
+
+    // tokenize the new prompt with mtmd
+    chunks = mtmd_input_chunks_init();
+    if (!chunks) {
+        sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory");
+        goto error;
+    }
+
+    {
+        struct llama_context *ctx = ai->ctx;
+        bool is_first = (llama_memory_seq_pos_max(llama_get_memory(ctx), 0) == -1);
+
+        mtmd_input_text input_text = { ai->chat.prompt, is_first, true };
+        int32_t rc = mtmd_tokenize(ai->vision, chunks, &input_text, (const mtmd_bitmap **)bitmaps, n_images);
+        if (rc != 0) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Failed to tokenize multimodal input (error %d)", rc);
+            goto error;
+        }
+
+        llama_pos n_past = is_first ? 0 : llama_memory_seq_pos_max(llama_get_memory(ctx), 0) + 1;
+        int n_batch = (int)llama_n_batch(ctx);
+        rc = mtmd_helper_eval_chunks(ai->vision, ctx, chunks, n_past, 0, n_batch, true, &n_past);
+        if (rc != 0) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Failed to evaluate multimodal prompt (error %d)", rc);
+            goto error;
+        }
+
+        // sample tokens
+        struct llama_sampler *sampler = ai->sampler;
+        if (!sampler) {
+            sqlite_context_result_error(context, SQLITE_ERROR, "Sampler not initialized");
+            goto error;
+        }
+
+        bool is_eog = false;
+        while (!is_eog) {
+            llama_token token_id = llama_sampler_sample(sampler, ctx, -1);
+            if (llama_vocab_is_eog(vocab, token_id)) break;
+
+            char tok[MAX_TOKEN_TEXT_LEN];
+            int32_t n = llama_token_to_piece(vocab, token_id, tok, MAX_TOKEN_TEXT_LEN, 0, true);
+            if (n < 0) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to convert token to string");
+                goto error;
+            }
+
+            if (!buffer_append(&ai->chat.response, tok, n, true)) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to grow response buffer");
+                goto error;
+            }
+
+            struct llama_batch batch = llama_batch_get_one(&token_id, 1);
+            if (llama_decode(ctx, batch)) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to decode during generation");
+                goto error;
+            }
+        }
+    }
+
+    // save response
+    if (!llm_chat_save_response(ai, messages, template)) goto error;
+
+    // return full response
+    sqlite3_result_text(context, ai->chat.response.data, -1, SQLITE_TRANSIENT);
+
+    // cleanup
+    for (int i = 0; i < n_images; i++) mtmd_bitmap_free(bitmaps[i]);
+    sqlite3_free(bitmaps);
+    mtmd_input_chunks_free(chunks);
+    sqlite3_free(prompt_with_markers);
+    return;
+
+error:
+    if (bitmaps) {
+        for (int i = 0; i < n_images; i++) if (bitmaps[i]) mtmd_bitmap_free(bitmaps[i]);
+        sqlite3_free(bitmaps);
+    }
+    if (chunks) mtmd_input_chunks_free(chunks);
+    sqlite3_free(prompt_with_markers);
+}
+
 // MARK: - Audio -
 
 static bool audio_process_check_arguments (sqlite3_context *context, const char *function_name, int argc, sqlite3_value **argv, bool check_audio_model) {
@@ -3320,10 +3826,7 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     rc = sqlite3_create_function(db, "llm_token_count", 1, SQLITE_UTF8, ctx, llm_token_count, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
-    rc = sqlite3_create_function(db, "llm_text_generate", 1, SQLITE_UTF8, ctx, llm_text_generate, NULL, NULL);
-    if (rc != SQLITE_OK) goto cleanup;
-    
-    rc = sqlite3_create_function(db, "llm_text_generate", 2, SQLITE_UTF8, ctx, llm_text_generate, NULL, NULL);
+    rc = sqlite3_create_function(db, "llm_text_generate", -1, SQLITE_UTF8, ctx, llm_text_generate, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
     rc = sqlite3_create_function(db, "llm_chat_create", 0, SQLITE_UTF8, ctx, llm_chat_create, NULL, NULL);
@@ -3344,7 +3847,7 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     rc = sqlite3_create_function(db, "llm_chat_restore", 1, SQLITE_UTF8, ctx, llm_chat_restore, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
-    rc = sqlite3_create_function(db, "llm_chat_respond", 1, SQLITE_UTF8, ctx, llm_chat_respond, NULL, NULL);
+    rc = sqlite3_create_function(db, "llm_chat_respond", -1, SQLITE_UTF8, ctx, llm_chat_respond, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
 
     rc = sqlite3_create_function(db, "llm_chat_system_prompt", 0, SQLITE_UTF8, ctx, llm_chat_system_prompt, NULL, NULL);
@@ -3404,6 +3907,16 @@ SQLITE_AI_API int sqlite3_ai_init (sqlite3 *db, char **pzErrMsg, const sqlite3_a
     rc = sqlite3_create_function(db, "llm_model_chat_template", 0, SQLITE_UTF8, ctx, llm_model_chat_template, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
     
+    // VISION
+    rc = sqlite3_create_function(db, "llm_vision_load", 1, SQLITE_UTF8, ctx, llm_vision_load, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_vision_load", 2, SQLITE_UTF8, ctx, llm_vision_load, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
+    rc = sqlite3_create_function(db, "llm_vision_free", 0, SQLITE_UTF8, ctx, llm_vision_free, NULL, NULL);
+    if (rc != SQLITE_OK) goto cleanup;
+
     // WHISPER
     rc = sqlite3_create_function(db, "audio_model_load", 1, SQLITE_UTF8, ctx, audio_model_load, NULL, NULL);
     if (rc != SQLITE_OK) goto cleanup;
