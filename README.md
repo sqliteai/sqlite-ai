@@ -228,4 +228,4 @@ Other projects in the ecosystem include:
 - **[SQLite-JS](https://github.com/sqliteai/sqlite-js)** — Create custom SQLite functions using JavaScript.
 - **[Liteparser](https://github.com/sqliteai/liteparser)** — A highly efficient and fully compliant SQLite SQL parser.
 
-Learn more at **[sqlite.ai](https://sqlite.ai)**.
+Learn more at **[SQLite AI](https://sqlite.ai)**.
