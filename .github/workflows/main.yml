@@ -24,6 +24,7 @@ env:
 
 jobs:
   download-models:
+    if: ${{ !contains(github.event.head_commit.message, '[auto-update]') }}
     outputs:
       gguf-cache-key: gguf-${{ steps.meta.outputs.gguf-hash }}
       gguf-model-path: ${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}
@@ -99,6 +100,7 @@ jobs:
         run: test -f "${{ env.AUDIO_TEST_WAV }}"
 
   build:
+    if: ${{ !contains(github.event.head_commit.message, '[auto-update]') }}
     needs: download-models
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container && matrix.container || '' }}
@@ -635,7 +637,7 @@ jobs:
             git config --global user.email "$GITHUB_ACTOR@users.noreply.github.com"
             git config --global user.name "$GITHUB_ACTOR"
             git add Package.swift
-            git commit -m "Update Package.swift checksum for ${VERSION} [skip ci]" || true
+            git commit -m "Update Package.swift checksum for ${VERSION} [auto-update]" || true
             git push origin main || true
           fi
 
