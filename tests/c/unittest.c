@@ -1657,6 +1657,83 @@ fail:
     return 1;
 }
 
+// Regression: llm_text_generate() must be callable repeatedly on one connection.
+// The implicit default sampler chain used to be published into ai->sampler and then
+// freed on the success path, leaving a dangling pointer that crashed the second call.
+static int test_text_generate_repeated(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_textgen('context_size=1024,n_predict=32');") != 0) goto fail;
+
+    for (int i = 0; i < 3; ++i) {
+        char result[4096] = {0};
+        if (exec_query_text(env, db, "SELECT llm_text_generate('Say hello in one word.');", result, sizeof(result)) != 0) goto fail;
+        if (result[0] == '\0') {
+            fprintf(stderr, "[text_generate_repeated] call %d returned empty output\n", i + 1);
+            goto fail;
+        }
+        if (env->verbose) printf("[text_generate_repeated] call %d: %s\n", i + 1, result);
+    }
+
+    // deliberately no llm_sampler_free(): the implicit chain must not leak or dangle
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close(db);
+    return assert_sqlite_memory_clean("text_generate_repeated", env);
+
+fail:
+    if (db) sqlite3_close(db);
+    return 1;
+}
+
+// Regression: a user-configured grammar sampler must be reset between generations.
+// Without llama_sampler_reset() the grammar stays in its terminal state after the
+// first call and every later call samples EOG immediately, returning ''.
+static int test_text_generate_repeated_grammar(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_textgen('context_size=1024,n_predict=32');") != 0) goto fail;
+
+    // grammar needs the vocab of a loaded model, and a selecting sampler must
+    // terminate the chain, otherwise llama_sampler_sample() asserts
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_create();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_grammar('root ::= \"yes\"', 'root');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_greedy();") != 0) goto fail;
+
+    for (int i = 0; i < 3; ++i) {
+        char result[4096] = {0};
+        if (exec_query_text(env, db, "SELECT llm_text_generate('Answer with yes.');", result, sizeof(result)) != 0) goto fail;
+        if (env->verbose) printf("[text_generate_repeated_grammar] call %d: '%s'\n", i + 1, result);
+        if (strcmp(result, "yes") != 0) {
+            fprintf(stderr, "[text_generate_repeated_grammar] call %d expected 'yes', got '%s'\n", i + 1, result);
+            goto fail;
+        }
+    }
+
+    // an explicit free followed by ai_free() at close must not double-free
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close(db);
+    return assert_sqlite_memory_clean("text_generate_repeated_grammar", env);
+
+fail:
+    if (db) sqlite3_close(db);
+    return 1;
+}
+
 // ---------------------------------------------------------------------
 // Audio / Whisper tests
 // ---------------------------------------------------------------------
@@ -2041,6 +2118,8 @@ static const test_case TESTS[] = {
     {"chat_respond_auto_init", test_chat_respond_auto_init},
     {"chat_save_with_metadata", test_chat_save_with_metadata},
     {"text_generate_default_limit", test_text_generate_default_limit},
+    {"text_generate_repeated", test_text_generate_repeated},
+    {"text_generate_repeated_grammar", test_text_generate_repeated_grammar},
     {"llm_chat_double_save", test_llm_chat_double_save},
     // Audio / Whisper tests
     {"audio_transcribe_no_model", test_audio_transcribe_no_model},
