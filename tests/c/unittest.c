@@ -634,8 +634,12 @@ static int test_llm_sampler_roundtrip(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_sampler_init_top_k(20);") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_sampler_init_temp(0.7);") != 0) goto fail;
     // dist or greedy step must be added at the end of the sampler chain
-    // otherwise the llm_chat_respond function will crash
-    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_dist();") != 0) goto fail;
+    // otherwise the llm_chat_respond function will crash.
+    // Seeded on purpose: llm_sampler_init_dist() with no argument uses
+    // LLAMA_DEFAULT_SEED, which llama.cpp resolves to a random seed, so the
+    // reply length varied run to run (32-238 chars locally) and occasionally
+    // ran to the 1024-token context limit, failing the decode.
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_dist(42);") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_respond('Say hello');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
