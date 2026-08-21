@@ -21,6 +21,8 @@ env:
   AUDIO_TEST_DIR: tests/audio
   AUDIO_TEST_WAV: tests/audio/jfk.wav
   AUDIO_TEST_WAV_URL: https://github.com/ggml-org/whisper.cpp/raw/master/samples/jfk.wav
+  # Pinned deliberately - see the "linux-x86_64 install vulkan" step.
+  VULKAN_SDK_VERSION: 1.4.350.1
 
 jobs:
   download-models:
@@ -308,8 +310,11 @@ jobs:
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
           sudo apt-get update -y
           sudo apt-get install -y mesa-vulkan-drivers
-          # Vulkan is no longer packed for Ubuntu
-          wget https://sdk.lunarg.com/sdk/download/latest/linux/vulkan-sdk.tar.xz?Human=true -O vulkan-sdk.tar.xz
+          # Vulkan is no longer packed for Ubuntu.
+          # Pinned: the "latest" URL moved the loader to lib/VulkanLoader/lib in
+          # 1.4.357.1, which CMake's FindVulkan cannot locate ("Could NOT find
+          # Vulkan (missing: Vulkan_LIBRARY)"). Bump deliberately, not implicitly.
+          wget https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/vulkan-sdk.tar.xz?Human=true -O vulkan-sdk.tar.xz
           tar -xf vulkan-sdk.tar.xz
           cd $(ls -d 1.* | head -n1)
           source setup-env.sh

@@ -675,6 +675,18 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
     return true;
 }
 
+// llama_decode() return codes (llama.h): 1 no KV slot, 2 aborted,
+// -1 invalid batch, < -1 fatal. Collapsing them into one message makes
+// four different failures indistinguishable in a CI log.
+static const char *llm_decode_error_string (int32_t rc) {
+    switch (rc) {
+        case  1: return "could not find a KV slot for the batch, context is full";
+        case  2: return "decoding was aborted";
+        case -1: return "invalid input batch";
+        default: return "fatal error";
+    }
+}
+
 struct llama_sampler *llm_sampler_check (ai_context *ai) {
     if (ai->sampler) return ai->sampler;
     
@@ -1378,7 +1390,7 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
     if (rc != 0) {
         sqlite3_free(tokens);
         sqlite3_free(embedding);
-        sqlite_context_result_error(context, SQLITE_ERROR, "Model %s failed during embedding generation (%d)", is_encoder_only ? "encode" : "decode", rc);
+        sqlite_context_result_error(context, SQLITE_ERROR, "Model %s failed during embedding generation (%d: %s)", is_encoder_only ? "encode" : "decode", rc, llm_decode_error_string(rc));
         return;
     }
 
@@ -1620,8 +1632,9 @@ static void llm_text_run (sqlite3_context *context, const char *text, int32_t te
             int chunk = n_prompt - prompt_pos;
             if (chunk > n_batch) chunk = n_batch;
             struct llama_batch batch = llama_batch_get_one(tokens + prompt_pos, chunk);
-            if (llama_decode(ctx, batch)) {
-                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to execute the decoding function during prompt processing");
+            int32_t drc = llama_decode(ctx, batch);
+            if (drc != 0) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to execute the decoding function during prompt processing (%d: %s)", drc, llm_decode_error_string(drc));
                 goto error_sampler;
             }
             prompt_pos += chunk;
@@ -1652,8 +1665,9 @@ static void llm_text_run (sqlite3_context *context, const char *text, int32_t te
 
             // decode the sampled token to advance the KV cache
             struct llama_batch batch = llama_batch_get_one(&new_token_id, 1);
-            if (llama_decode(ctx, batch)) {
-                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to execute the decoding function during generation");
+            int32_t drc = llama_decode(ctx, batch);
+            if (drc != 0) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to execute the decoding function during generation (%d: %s)", drc, llm_decode_error_string(drc));
                 goto error_sampler;
             }
         }
@@ -1803,8 +1817,9 @@ static bool llm_chat_generate_response (ai_context *ai, ai_cursor *c, bool *is_e
         return false;
     }
     
-    if (llama_decode(ctx, batch)) {
-        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to decode prompt batch");
+    int32_t drc = llama_decode(ctx, batch);
+    if (drc != 0) {
+        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to decode prompt batch (%d: %s)", drc, llm_decode_error_string(drc));
         return false;
     }
     
@@ -3209,8 +3224,9 @@ static void llm_text_run_vision (sqlite3_context *context, const char *text, int
             }
 
             struct llama_batch batch = llama_batch_get_one(&new_token_id, 1);
-            if (llama_decode(ctx, batch)) {
-                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to decode during generation");
+            int32_t drc = llama_decode(ctx, batch);
+            if (drc != 0) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to decode during generation (%d: %s)", drc, llm_decode_error_string(drc));
                 goto error_sampler;
             }
         }
@@ -3379,8 +3395,9 @@ static void llm_chat_respond_vision (sqlite3_context *context, ai_context *ai,
             }
 
             struct llama_batch batch = llama_batch_get_one(&token_id, 1);
-            if (llama_decode(ctx, batch)) {
-                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to decode during generation");
+            int32_t drc = llama_decode(ctx, batch);
+            if (drc != 0) {
+                sqlite_context_result_error(context, SQLITE_ERROR, "Failed to decode during generation (%d: %s)", drc, llm_decode_error_string(drc));
                 goto error;
             }
         }
