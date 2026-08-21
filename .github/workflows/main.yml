@@ -21,7 +21,8 @@ env:
   AUDIO_TEST_DIR: tests/audio
   AUDIO_TEST_WAV: tests/audio/jfk.wav
   AUDIO_TEST_WAV_URL: https://github.com/ggml-org/whisper.cpp/raw/master/samples/jfk.wav
-  # Pinned deliberately - see the "linux-x86_64 install vulkan" step.
+  # Pinned so the Vulkan toolchain cannot change under CI without a visible
+  # diff. Bump deliberately - see the "linux-x86_64 install vulkan" step.
   VULKAN_SDK_VERSION: 1.4.350.1
 
 jobs:
@@ -310,14 +311,26 @@ jobs:
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
           sudo apt-get update -y
           sudo apt-get install -y mesa-vulkan-drivers
-          # Vulkan is no longer packed for Ubuntu.
-          # Pinned: the "latest" URL moved the loader to lib/VulkanLoader/lib in
-          # 1.4.357.1, which CMake's FindVulkan cannot locate ("Could NOT find
-          # Vulkan (missing: Vulkan_LIBRARY)"). Bump deliberately, not implicitly.
+          # Vulkan is no longer packed for Ubuntu
           wget https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/vulkan-sdk.tar.xz?Human=true -O vulkan-sdk.tar.xz
           tar -xf vulkan-sdk.tar.xz
           cd $(ls -d 1.* | head -n1)
           source setup-env.sh
+          # The SDK keeps the loader in lib/VulkanLoader/lib, which CMake's
+          # FindVulkan does not search: it finds the headers and the version but
+          # then fails with "Could NOT find Vulkan (missing: Vulkan_LIBRARY)".
+          # Locate libvulkan.so wherever the tarball puts it and hand the
+          # directory to find_library() via the CMAKE_LIBRARY_PATH env var, so a
+          # future layout change is a loud error here rather than a cryptic one
+          # 300 lines into a CMake trace.
+          vk_loader=$(find "$VULKAN_SDK" -name libvulkan.so -print -quit)
+          if [ -z "$vk_loader" ]; then
+            echo "::error::libvulkan.so not found under $VULKAN_SDK"
+            find "$VULKAN_SDK" -name 'libvulkan.so*'
+            exit 1
+          fi
+          echo "Vulkan loader: $vk_loader"
+          echo "CMAKE_LIBRARY_PATH=$(dirname "$vk_loader")" >> $GITHUB_ENV
           echo "VULKAN_SDK=$VULKAN_SDK" >> $GITHUB_ENV
           echo "PATH=$PATH" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
