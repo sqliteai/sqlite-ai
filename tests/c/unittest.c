@@ -48,7 +48,7 @@ static int open_db_and_load(const test_env *env, sqlite3 **out_db) {
     int rc = sqlite3_open(":memory:", &db);
     if (rc != SQLITE_OK) {
         fprintf(stderr, "sqlite3_open failed: %s\n", db ? sqlite3_errmsg(db) : "unknown error");
-        if (db) sqlite3_close(db);
+        if (db) sqlite3_close_v2(db);
         return rc;
     }
     sqlite3_enable_load_extension(db, 1);
@@ -61,7 +61,7 @@ static int open_db_and_load(const test_env *env, sqlite3 **out_db) {
     if (rc != SQLITE_OK) {
         fprintf(stderr, "sqlite3_load_extension failed: %s\n", errmsg ? errmsg : sqlite3_errmsg(db));
         if (errmsg) sqlite3_free(errmsg);
-        sqlite3_close(db);
+        sqlite3_close_v2(db);
         return rc;
     }
     if (errmsg) sqlite3_free(errmsg);
@@ -146,6 +146,19 @@ static int exec_expect_ok(const test_env *env, sqlite3 *db, const char *sql) {
     return 0;
 }
 
+// llm_chat_check_context() installs min_p -> temp(0.8) -> dist(LLAMA_DEFAULT_SEED),
+// and llama.cpp resolves that seed to a random one, so reply length varied run to
+// run and occasionally ran the context out - see test_llm_sampler_roundtrip. Install
+// the same chain with a fixed seed. Call this AFTER llm_model_load(): loading a model
+// releases the connection's sampler.
+static int install_seeded_chat_sampler(const test_env *env, sqlite3 *db) {
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_create();")            != 0) return 1;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_min_p(0.05, 1);") != 0) return 1;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_temp(0.8);")      != 0) return 1;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_dist(7);")       != 0) return 1;
+    return 0;
+}
+
 static int exec_select_rows(const test_env *env, sqlite3 *db, const char *sql, int *rows_out) {
     if (env->verbose) {
         printf("[SQL] %s\n", sql);
@@ -181,6 +194,21 @@ static int exec_select_rows(const test_env *env, sqlite3 *db, const char *sql, i
     return 0;
 }
 
+// SQLITE_STATUS_MEMORY_USED is a PROCESS-GLOBAL counter. Asserting that it is
+// back to zero means one test that bails out without a clean teardown makes
+// every later test report the same phantom leak - a single real failure turns
+// into a whole-suite failure and the culprit is buried. Compare against a
+// baseline captured just before each test instead, so a leak is attributed to
+// the test that actually caused it.
+static sqlite3_int64 memory_baseline = 0;
+
+static void capture_sqlite_memory_baseline(void) {
+    sqlite3_int64 highwater = 0;
+    if (sqlite3_status64(SQLITE_STATUS_MEMORY_USED, &memory_baseline, &highwater, 0) != SQLITE_OK) {
+        memory_baseline = 0;
+    }
+}
+
 static int assert_sqlite_memory_clean(const char *label, const test_env *env) {
     sqlite3_int64 current = 0;
     sqlite3_int64 highwater = 0;
@@ -189,12 +217,14 @@ static int assert_sqlite_memory_clean(const char *label, const test_env *env) {
         return 1;
     }
     if (env->verbose) {
-        printf("[STATUS][%s] memory current=%lld highwater=%lld\n",
-               label, (long long)current, (long long)highwater);
+        printf("[STATUS][%s] memory current=%lld baseline=%lld highwater=%lld\n",
+               label, (long long)current, (long long)memory_baseline, (long long)highwater);
     }
-    if (current != 0) {
-        fprintf(stderr, "[%s] sqlite3 memory leak detected: current=%lld highwater=%lld\n",
-                label, (long long)current, (long long)highwater);
+    if (current != memory_baseline) {
+        fprintf(stderr, "[%s] sqlite3 memory leak detected: %lld byte(s) not released "
+                        "(current=%lld baseline=%lld highwater=%lld)\n",
+                label, (long long)(current - memory_baseline),
+                (long long)current, (long long)memory_baseline, (long long)highwater);
         return 1;
     }
     return 0;
@@ -326,7 +356,7 @@ static int test_issue15_chat_without_context(const test_env *env) {
     }
 
     int rc = exec_expect_error(env, db, "SELECT llm_chat_create();", "Please call llm_context_create()");
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     if (rc == 0) {
         return assert_sqlite_memory_clean("issue15", env);
     }
@@ -343,15 +373,19 @@ static int test_llm_chat_respond_repeated(const test_env *env) {
     const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) {
-        sqlite3_close(db);
+        sqlite3_close_v2(db);
+        return 1;
+    }
+    if (install_seeded_chat_sampler(env, db) != 0) {
+        sqlite3_close_v2(db);
         return 1;
     }
     if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1000');") != 0) {
-        sqlite3_close(db);
+        sqlite3_close_v2(db);
         return 1;
     }
     if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) {
-        sqlite3_close(db);
+        sqlite3_close_v2(db);
         return 1;
     }
 
@@ -363,30 +397,30 @@ static int test_llm_chat_respond_repeated(const test_env *env) {
     };
     for (int i = 0; i < iterations; ++i) {
         if (exec_expect_ok(env, db, prompts[i]) != 0) {
-            sqlite3_close(db);
+            sqlite3_close_v2(db);
             return 1;
         }
         
         if (exec_expect_ok(env, db, "SELECT llm_context_used() AS context_used, llm_context_size() AS context_size, CAST(llm_context_used() AS FLOAT)/CAST(llm_context_size() AS FLOAT) || '%' AS 'context_usage_percentage';") != 0) {
-            sqlite3_close(db);
+            sqlite3_close_v2(db);
             return 1;
         }
     }
 
     if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) {
-        sqlite3_close(db);
+        sqlite3_close_v2(db);
         return 1;
     }
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) {
-        sqlite3_close(db);
+        sqlite3_close_v2(db);
         return 1;
     }
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) {
-        sqlite3_close(db);
+        sqlite3_close_v2(db);
         return 1;
     }
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
 
     return assert_sqlite_memory_clean("chat_respond_repeated", env);
 }
@@ -401,6 +435,7 @@ static int test_llm_chat_vtab(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1000');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
     int rows = 0;
@@ -418,12 +453,12 @@ static int test_llm_chat_vtab(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
 
     return assert_sqlite_memory_clean("chat_vtab", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -446,7 +481,7 @@ static int test_llm_embed_generate(const test_env *env) {
 
     // Intentionally skip llm_context_free/llm_model_free to mimic how Python GC drops
     // connections without calling the cleanup helpers (see GH issue #14).
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     db = NULL;
 
     // Reopening another connection will reinitialize the extension; on unfixed builds
@@ -454,12 +489,12 @@ static int test_llm_embed_generate(const test_env *env) {
     if (open_db_and_load(env, &db) != SQLITE_OK) {
         return 1;
     }
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     
     return assert_sqlite_memory_clean("llm_embed_generate", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -504,7 +539,7 @@ cleanup:
     if (stmt) sqlite3_finalize(stmt);
     exec_expect_ok(env, db, "SELECT llm_context_free();");
     exec_expect_ok(env, db, "SELECT llm_model_free();");
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     if (status == 0) {
         if (assert_sqlite_memory_clean("llm_embed_generate_basic", env) != 0) {
             return 1;
@@ -523,23 +558,24 @@ static int test_llm_embedding_then_chat(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
 
     if (exec_expect_ok(env, db, "SELECT llm_context_create_embedding('embedding_type=UINT8');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_embed_generate('document text for embeddings');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
 
-    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=512');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=1024');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_respond('Summarize the previous document.');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("llm_embedding_then_chat", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -550,7 +586,7 @@ static int test_llm_context_size_errors(const test_env *env) {
     }
 
     if (exec_expect_error(env, db, "SELECT llm_context_size();", "No context found") != 0) {
-        sqlite3_close(db);
+        sqlite3_close_v2(db);
         return 1;
     }
 
@@ -563,11 +599,11 @@ static int test_llm_context_size_errors(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("llm_context_size_errors", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -581,6 +617,7 @@ static int test_document_ingestion_flow(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
 
     if (exec_expect_ok(env, db, "SELECT llm_context_create_embedding('context_size=768,embedding_type=UINT8');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_embed_generate('Document chunk content.');") != 0) goto fail;
@@ -594,11 +631,11 @@ static int test_document_ingestion_flow(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("document_ingestion_flow", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -617,8 +654,12 @@ static int test_llm_sampler_roundtrip(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_sampler_init_top_k(20);") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_sampler_init_temp(0.7);") != 0) goto fail;
     // dist or greedy step must be added at the end of the sampler chain
-    // otherwise the llm_chat_respond function will crash
-    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_dist();") != 0) goto fail;
+    // otherwise the llm_chat_respond function will crash.
+    // Seeded on purpose: llm_sampler_init_dist() with no argument uses
+    // LLAMA_DEFAULT_SEED, which llama.cpp resolves to a random seed, so the
+    // reply length varied run to run (32-238 chars locally) and occasionally
+    // ran to the 1024-token context limit, failing the decode.
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_dist(42);") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_respond('Say hello');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
@@ -626,11 +667,48 @@ static int test_llm_sampler_roundtrip(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("llm_sampler_roundtrip", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
+// Every chat test installs a seeded sampler, so none of them exercise
+// llm_chat_check_context()'s default-chain creation any more. Cover it here
+// without generating a single token: llm_chat_create() runs check_context, so a
+// successful call on a connection that never called llm_sampler_create() proves
+// the default chain was built.
+static int test_chat_default_sampler_autocreate(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=1024');") != 0) goto fail;
+
+    // deliberately no llm_sampler_create(): the default chain must be built for us
+    char uuid[128] = {0};
+    if (exec_query_text(env, db, "SELECT llm_chat_create();", uuid, sizeof(uuid)) != 0) goto fail;
+    if (uuid[0] == '\0') {
+        fprintf(stderr, "[chat_default_sampler_autocreate] expected a chat uuid\n");
+        goto fail;
+    }
+    if (env->verbose) printf("[chat_default_sampler_autocreate] uuid: %s\n", uuid);
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("chat_default_sampler_autocreate", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -645,26 +723,27 @@ static int test_dual_connection_roles(const test_env *env) {
 
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db_embed, sqlbuf) != 0) goto fail;
-    if (exec_expect_ok(env, db_embed, "SELECT llm_context_create_embedding('context_size=512,embedding_type=UINT8');") != 0) goto fail;
+    if (exec_expect_ok(env, db_embed, "SELECT llm_context_create_embedding('context_size=768,embedding_type=UINT8');") != 0) goto fail;
     if (exec_expect_ok(env, db_embed, "SELECT llm_embed_generate('dual connection embedding text');") != 0) goto fail;
     if (exec_expect_ok(env, db_embed, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db_embed, "SELECT llm_model_free();") != 0) goto fail;
 
     if (exec_expect_ok(env, db_text, sqlbuf) != 0) goto fail;
-    if (exec_expect_ok(env, db_text, "SELECT llm_context_create_chat('context_size=512');") != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db_text) != 0) goto fail;
+    if (exec_expect_ok(env, db_text, "SELECT llm_context_create_chat('context_size=1024');") != 0) goto fail;
     if (exec_expect_ok(env, db_text, "SELECT llm_chat_create();") != 0) goto fail;
     if (exec_expect_ok(env, db_text, "SELECT llm_chat_respond('Hello from text connection');") != 0) goto fail;
     if (exec_expect_ok(env, db_text, "SELECT llm_chat_free();") != 0) goto fail;
     if (exec_expect_ok(env, db_text, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db_text, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db_embed);
-    sqlite3_close(db_text);
+    sqlite3_close_v2(db_embed);
+    sqlite3_close_v2(db_text);
     return assert_sqlite_memory_clean("dual_connection_roles", env);
 
 fail:
-    if (db_embed) sqlite3_close(db_embed);
-    if (db_text) sqlite3_close(db_text);
+    if (db_embed) sqlite3_close_v2(db_embed);
+    if (db_text) sqlite3_close_v2(db_text);
     return 1;
 }
 
@@ -688,19 +767,19 @@ static int test_concurrent_connections_independent(const test_env *env) {
 
     if (exec_expect_ok(env, db_one, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db_one, "SELECT llm_model_free();") != 0) goto fail;
-    sqlite3_close(db_one);
+    sqlite3_close_v2(db_one);
     db_one = NULL;
 
     if (exec_expect_ok(env, db_two, "SELECT llm_embed_generate('still active after peer closed');") != 0) goto fail;
     if (exec_expect_ok(env, db_two, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db_two, "SELECT llm_model_free();") != 0) goto fail;
-    sqlite3_close(db_two);
+    sqlite3_close_v2(db_two);
 
     return assert_sqlite_memory_clean("concurrent_connections_independent", env);
 
 fail:
-    if (db_one) sqlite3_close(db_one);
-    if (db_two) sqlite3_close(db_two);
+    if (db_one) sqlite3_close_v2(db_one);
+    if (db_two) sqlite3_close_v2(db_two);
     return 1;
 }
 
@@ -711,7 +790,7 @@ static int test_llm_model_load_error_recovery(const test_env *env) {
     }
 
     if (exec_expect_error(env, db, "SELECT llm_model_load('/path/that/does/not/exist.gguf');", "Unable to load model") != 0) {
-        sqlite3_close(db);
+        sqlite3_close_v2(db);
         return 1;
     }
 
@@ -723,11 +802,11 @@ static int test_llm_model_load_error_recovery(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("llm_model_load_error_recovery", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -751,11 +830,11 @@ static int test_ai_logging_table(const test_env *env) {
     }
 
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("ai_logging_table", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -809,11 +888,11 @@ static int test_llm_embed_input_too_large(const test_env *env) {
 
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("llm_embed_input_too_large", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -854,11 +933,11 @@ static int test_llm_embed_nctx_exceeds_train(const test_env *env) {
 
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("llm_embed_nctx_exceeds_train", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -879,11 +958,11 @@ static int test_llm_embed_max_tokens_limit(const test_env *env) {
 
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("llm_embed_max_tokens_limit", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -928,12 +1007,12 @@ static int test_llm_embed_repeated_calls(const test_env *env) {
 
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("llm_embed_repeated_calls", env);
 
 fail:
     if (stmt) sqlite3_finalize(stmt);
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -968,11 +1047,11 @@ static int test_llm_embed_empty_input(const test_env *env) {
 
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("llm_embed_empty_input", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1041,7 +1120,7 @@ done:
     if (chat_created) exec_expect_ok(env, db, "SELECT llm_chat_free();");
     if (context_created) exec_expect_ok(env, db, "SELECT llm_context_free();");
     if (model_loaded) exec_expect_ok(env, db, "SELECT llm_model_free();");
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     if (status == 0) status = assert_sqlite_memory_clean("llm_context_size_errors", env);
     return status;
 }
@@ -1105,7 +1184,7 @@ done:
     if (chat_created) exec_expect_ok(env, db, "SELECT llm_chat_free();");
     if (context_created) exec_expect_ok(env, db, "SELECT llm_context_free();");
     if (model_loaded) exec_expect_ok(env, db, "SELECT llm_model_free();");
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     if (status == 0) status = assert_sqlite_memory_clean("llm_context_size_errors", env);
     return status;
 }
@@ -1126,6 +1205,7 @@ static int test_chat_system_prompt_after_first_response(const test_env *env) {
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto done;
     model_loaded = true;
+    if (install_seeded_chat_sampler(env, db) != 0) goto done;
 
     if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1000');") != 0) goto done;
     context_created = true;
@@ -1186,7 +1266,7 @@ done:
     if (chat_created) exec_expect_ok(env, db, "SELECT llm_chat_free();");
     if (context_created) exec_expect_ok(env, db, "SELECT llm_context_free();");
     if (model_loaded) exec_expect_ok(env, db, "SELECT llm_model_free();");
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     if (status == 0) status = assert_sqlite_memory_clean("llm_context_size_errors", env);
     return status;
 }
@@ -1200,7 +1280,8 @@ static int test_chat_create_free_cycle(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
-    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=512');") != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1024');") != 0) goto fail;
 
     // create and free chat multiple times to test for dangling pointers
     for (int i = 0; i < 3; i++) {
@@ -1215,11 +1296,11 @@ static int test_chat_create_free_cycle(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("chat_create_free_cycle", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1232,6 +1313,7 @@ static int test_chat_recreate_after_conversation(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1000');") != 0) goto fail;
 
     // first chat session
@@ -1256,11 +1338,11 @@ static int test_chat_recreate_after_conversation(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("chat_recreate_after_conversation", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1273,6 +1355,7 @@ static int test_chat_vtab_multi_turn(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1000');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
 
@@ -1299,11 +1382,11 @@ static int test_chat_vtab_multi_turn(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("chat_vtab_multi_turn", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1316,6 +1399,7 @@ static int test_chat_save_restore_roundtrip(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1000');") != 0) goto fail;
 
     // create chat, set system prompt, send a message, save
@@ -1358,11 +1442,11 @@ static int test_chat_save_restore_roundtrip(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("chat_save_restore_roundtrip", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1375,7 +1459,7 @@ static int test_chat_system_prompt_clear(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
-    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=512');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1024');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
 
     // set a system prompt
@@ -1404,11 +1488,11 @@ static int test_chat_system_prompt_clear(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("chat_system_prompt_clear", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1437,11 +1521,11 @@ static int test_text_generate_with_eog(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("text_generate_with_eog", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1454,7 +1538,8 @@ static int test_chat_double_free(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
-    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=512');") != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1024');") != 0) goto fail;
 
     if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_respond('Hi');") != 0) goto fail;
@@ -1466,11 +1551,11 @@ static int test_chat_double_free(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("chat_double_free", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1483,6 +1568,7 @@ static int test_chat_respond_auto_init(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1000');") != 0) goto fail;
 
     // skip llm_chat_create — llm_chat_respond should auto-initialize via check_context
@@ -1495,11 +1581,11 @@ static int test_chat_respond_auto_init(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("chat_respond_auto_init", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1512,6 +1598,7 @@ static int test_chat_save_with_metadata(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1000');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_chat_respond('Hello');") != 0) goto fail;
@@ -1531,11 +1618,11 @@ static int test_chat_save_with_metadata(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("chat_save_with_metadata", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1562,11 +1649,11 @@ static int test_text_generate_default_limit(const test_env *env) {
     if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("text_generate_default_limit", env);
 
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1580,7 +1667,7 @@ static int test_audio_transcribe_no_model(const test_env *env) {
     if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
 
     int rc = exec_expect_error(env, db, "SELECT audio_model_transcribe('/tmp/test.wav');", "No model");
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     if (rc != 0) return rc;
     return assert_sqlite_memory_clean("audio_transcribe_no_model", env);
 }
@@ -1591,7 +1678,7 @@ static int test_audio_model_load_invalid_path(const test_env *env) {
     if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
 
     int rc = exec_expect_error(env, db, "SELECT audio_model_load('/nonexistent/model.bin');", "Unable to load audio model");
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     if (rc != 0) return rc;
     return assert_sqlite_memory_clean("audio_model_load_invalid_path", env);
 }
@@ -1608,11 +1695,11 @@ static int test_audio_model_load_free(const test_env *env) {
 
     char sql[1024];
     snprintf(sql, sizeof(sql), "SELECT audio_model_load('%s');", env->whisper_model_path);
-    if (exec_expect_ok(env, db, sql) != 0) { sqlite3_close(db); return 1; }
+    if (exec_expect_ok(env, db, sql) != 0) { sqlite3_close_v2(db); return 1; }
 
-    if (exec_expect_ok(env, db, "SELECT audio_model_free();") != 0) { sqlite3_close(db); return 1; }
+    if (exec_expect_ok(env, db, "SELECT audio_model_free();") != 0) { sqlite3_close_v2(db); return 1; }
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("audio_model_load_free", env);
 }
 
@@ -1644,10 +1731,10 @@ static int test_audio_transcribe_file(const test_env *env) {
 
     if (exec_expect_ok(env, db, "SELECT audio_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("audio_transcribe_file", env);
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1716,10 +1803,10 @@ static int test_audio_transcribe_blob(const test_env *env) {
 
     if (exec_expect_ok(env, db, "SELECT audio_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("audio_transcribe_blob", env);
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1750,10 +1837,10 @@ static int test_audio_transcribe_with_options(const test_env *env) {
 
     if (exec_expect_ok(env, db, "SELECT audio_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("audio_transcribe_with_options", env);
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1781,10 +1868,10 @@ static int test_audio_transcribe_unsupported_format(const test_env *env) {
 
     if (exec_expect_ok(env, db, "SELECT audio_model_free();") != 0) goto fail;
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("audio_transcribe_unsupported_format", env);
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1805,10 +1892,10 @@ static int test_audio_model_load_free_cycle(const test_env *env) {
         if (exec_expect_ok(env, db, "SELECT audio_model_free();") != 0) goto fail;
     }
 
-    sqlite3_close(db);
+    sqlite3_close_v2(db);
     return assert_sqlite_memory_clean("audio_model_load_free_cycle", env);
 fail:
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
     return 1;
 }
 
@@ -1829,6 +1916,8 @@ static int test_llm_chat_double_save(const test_env *env) {
     if (exec_expect_ok(env, db, sqlbuf) != 0)
         goto done;
     model_loaded = true;
+    if (install_seeded_chat_sampler(env, db) != 0)
+        goto done;
     
     if (exec_expect_ok(env, db,
                        "SELECT llm_context_create('context_size=1000');") != 0)
@@ -1913,7 +2002,7 @@ done:
     if (model_loaded)
         exec_expect_ok(env, db, "SELECT llm_model_free();");
     if (db)
-        sqlite3_close(db);
+        sqlite3_close_v2(db);
     if (status == 0)
         status = assert_sqlite_memory_clean("llm_chat_double_save", env);
     return status;
@@ -1929,6 +2018,7 @@ static const test_case TESTS[] = {
     {"llm_context_size_errors", test_llm_context_size_errors},
     {"document_ingestion_flow", test_document_ingestion_flow},
     {"llm_sampler_roundtrip", test_llm_sampler_roundtrip},
+    {"chat_default_sampler_autocreate", test_chat_default_sampler_autocreate},
     {"dual_connection_roles", test_dual_connection_roles},
     {"concurrent_connections_independent", test_concurrent_connections_independent},
     {"llm_model_load_error_recovery", test_llm_model_load_error_recovery},
@@ -2018,6 +2108,7 @@ int main(int argc, char **argv) {
 
     size_t total = sizeof(TESTS) / sizeof(TESTS[0]);
     int failures = 0;
+    const char *first_failure = NULL;
 
     if (selected_test) printf("Running 1 C test\n\n");
     else printf("Running %zu C test(s)\n\n", total);
@@ -2026,9 +2117,13 @@ int main(int argc, char **argv) {
         if (selected_test && strcmp(tc->name, selected_test) != 0) {
             continue;
         }
+        capture_sqlite_memory_baseline();
         int rc = tc->fn(&env);
         printf("- %s ... %s\n", tc->name, rc == 0 ? "PASS" : "FAIL");
-        if (rc != 0) failures += 1;
+        if (rc != 0) {
+            if (failures == 0) first_failure = tc->name;
+            failures += 1;
+        }
     }
     if (selected_test && failures == 0) {
         bool found = false;
@@ -2045,7 +2140,8 @@ int main(int argc, char **argv) {
     }
 
     if (failures) {
-        fprintf(stderr, "\n%d C test(s) failed.\n", failures);
+        fprintf(stderr, "\n%d C test(s) failed. First failure: %s\n", failures,
+                first_failure ? first_failure : "unknown");
         return EXIT_FAILURE;
     }
 
