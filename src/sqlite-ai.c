@@ -687,11 +687,17 @@ static const char *llm_decode_error_string (int32_t rc) {
     }
 }
 
+// creates a new, unowned sampler chain; the caller owns the returned pointer
+static struct llama_sampler *llm_sampler_new (void) {
+    struct llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
+    return llama_sampler_chain_init(sampler_params);
+}
+
+// returns the connection-owned sampler chain, creating and publishing it if needed
 struct llama_sampler *llm_sampler_check (ai_context *ai) {
     if (ai->sampler) return ai->sampler;
     
-    struct llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
-    struct llama_sampler *sampler = llama_sampler_chain_init(sampler_params);
+    struct llama_sampler *sampler = llm_sampler_new();
     if (!sampler) {
         sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "Unable to create sampler");
         return NULL;
@@ -845,11 +851,12 @@ static void ai_free (void *ctx, bool free_ai, bool free_llm, bool free_audio) {
         ai->vision = NULL;
         memset(ai->lora, 0, sizeof(struct llama_adapter_lora *)*MAX_LORAS);
         memset(ai->lora_scale, 0, sizeof(float)*MAX_LORAS);
+        // free before ctx/model: grammar/infill/mirostat samplers cache a vocab pointer
+        if (ai->sampler) llama_sampler_free(ai->sampler);
+        ai->sampler = NULL;
         if (ai->ctx) llama_set_adapters_lora(ai->ctx, NULL, 0, NULL);
         if (ai->ctx) llama_free(ai->ctx);
         if (ai->model) llama_model_free(ai->model);
-        // sampler chain is freed explicitly via llm_sampler_free() or llm_sampler_create() SQL functions;
-        // freeing it here causes a double-free crash when ai_destroy runs after explicit cleanup
         llm_options_init(&ai->options);
         
         ai->model = NULL;
@@ -1515,6 +1522,7 @@ static void llm_text_run (sqlite3_context *context, const char *text, int32_t te
     bool buffer_initialized = false;
     buffer_t buffer = {0};
     char *formatted_prompt = NULL;
+    struct llama_sampler *owned_sampler = NULL;   // ephemeral chain, never published into ai->sampler
 
     // sanity check vocab
     const struct llama_vocab *vocab = llama_model_get_vocab(ai->model);
@@ -1608,20 +1616,28 @@ static void llm_text_run (sqlite3_context *context, const char *text, int32_t te
         goto error;
     }
 
-    // initialize the sampler
-    bool sampler_already_setup = (ai->sampler != NULL);
-    struct llama_sampler *sampler = llm_sampler_check(ai);
-    if (!sampler) goto error;
-    if (!sampler_already_setup) {
-        // no sampler was setup, so initialize it with some default values
+    // a user-configured chain belongs to the connection; otherwise build an
+    // ephemeral one that lives only for this call
+    struct llama_sampler *sampler = ai->sampler;
+    if (sampler == NULL || llama_sampler_chain_n(sampler) == 0) {
+        owned_sampler = llm_sampler_new();
+        if (!owned_sampler) {
+            sqlite_context_result_error(context, SQLITE_NOMEM, "Unable to create sampler");
+            goto error;
+        }
+        sampler = owned_sampler;
         llama_sampler_chain_add(sampler, llama_sampler_init_penalties(64, 1.1, 0, 0));
         llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
     }
 
+    // the KV cache was cleared above, so the sampler must start clean too:
+    // rebuild grammar state, re-seed dist, clear penalty history
+    llama_sampler_reset(sampler);
+
     // allocate output buffer (starts small, grows dynamically via buffer_append)
     if (!buffer_create(&buffer, 0)) {
         sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to allocate buffer");
-        goto error_sampler;
+        goto error;
     }
     buffer_initialized = true;
 
@@ -1635,7 +1651,7 @@ static void llm_text_run (sqlite3_context *context, const char *text, int32_t te
             int32_t drc = llama_decode(ctx, batch);
             if (drc != 0) {
                 sqlite_context_result_error(context, SQLITE_ERROR, "Failed to execute the decoding function during prompt processing (%d: %s)", drc, llm_decode_error_string(drc));
-                goto error_sampler;
+                goto error;
             }
             prompt_pos += chunk;
         }
@@ -1655,12 +1671,12 @@ static void llm_text_run (sqlite3_context *context, const char *text, int32_t te
             int n = llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
             if (n < 0) {
                 sqlite_context_result_error(context, SQLITE_ERROR, "Failed to convert token to piece (%d)", n);
-                goto error_sampler;
+                goto error;
             }
 
             if (buffer_append(&buffer, buf, n, true) == false) {
                 sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory: failed to append to buffer");
-                goto error_sampler;
+                goto error;
             }
 
             // decode the sampled token to advance the KV cache
@@ -1668,7 +1684,7 @@ static void llm_text_run (sqlite3_context *context, const char *text, int32_t te
             int32_t drc = llama_decode(ctx, batch);
             if (drc != 0) {
                 sqlite_context_result_error(context, SQLITE_ERROR, "Failed to execute the decoding function during generation (%d: %s)", drc, llm_decode_error_string(drc));
-                goto error_sampler;
+                goto error;
             }
         }
     }
@@ -1677,16 +1693,12 @@ static void llm_text_run (sqlite3_context *context, const char *text, int32_t te
     sqlite3_result_text(context, buffer.data, buffer.length, sqlite3_free);
     sqlite3_free(tokens);
     sqlite3_free(formatted_prompt);
-    if (!sampler_already_setup) llama_sampler_free(sampler);
+    if (owned_sampler) llama_sampler_free(owned_sampler);
     return;
 
-error_sampler:
-    if (!sampler_already_setup && ai->sampler) {
-        llama_sampler_free(ai->sampler);
-        ai->sampler = NULL;
-    }
 error:
     if (buffer_initialized) buffer_destroy(&buffer);
+    if (owned_sampler) llama_sampler_free(owned_sampler);
     sqlite3_free(tokens);
     sqlite3_free(formatted_prompt);
 }
@@ -3118,6 +3130,7 @@ static void llm_text_run_vision (sqlite3_context *context, const char *text, int
     char *formatted_prompt = NULL;
     mtmd_bitmap **bitmaps = NULL;
     mtmd_input_chunks *chunks = NULL;
+    struct llama_sampler *owned_sampler = NULL;   // ephemeral chain, never published into ai->sampler
 
     struct llama_context *ctx = ai->ctx;
     if (!ctx) {
@@ -3188,19 +3201,28 @@ static void llm_text_run_vision (sqlite3_context *context, const char *text, int
         }
     }
 
-    // initialize sampler
-    bool sampler_already_setup = (ai->sampler != NULL);
-    struct llama_sampler *sampler = llm_sampler_check(ai);
-    if (!sampler) goto error;
-    if (!sampler_already_setup) {
+    // a user-configured chain belongs to the connection; otherwise build an
+    // ephemeral one that lives only for this call
+    struct llama_sampler *sampler = ai->sampler;
+    if (sampler == NULL || llama_sampler_chain_n(sampler) == 0) {
+        owned_sampler = llm_sampler_new();
+        if (!owned_sampler) {
+            sqlite_context_result_error(context, SQLITE_NOMEM, "Unable to create sampler");
+            goto error;
+        }
+        sampler = owned_sampler;
         llama_sampler_chain_add(sampler, llama_sampler_init_penalties(64, 1.1, 0, 0));
         llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
     }
 
+    // the KV cache was cleared above, so the sampler must start clean too:
+    // rebuild grammar state, re-seed dist, clear penalty history
+    llama_sampler_reset(sampler);
+
     // allocate output buffer
     if (!buffer_create(&buffer, 0)) {
         sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory");
-        goto error_sampler;
+        goto error;
     }
     buffer_initialized = true;
 
@@ -3215,19 +3237,19 @@ static void llm_text_run_vision (sqlite3_context *context, const char *text, int
             int n = llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
             if (n < 0) {
                 sqlite_context_result_error(context, SQLITE_ERROR, "Failed to convert token to piece");
-                goto error_sampler;
+                goto error;
             }
 
             if (!buffer_append(&buffer, buf, n, true)) {
                 sqlite_context_result_error(context, SQLITE_NOMEM, "Out of memory");
-                goto error_sampler;
+                goto error;
             }
 
             struct llama_batch batch = llama_batch_get_one(&new_token_id, 1);
             int32_t drc = llama_decode(ctx, batch);
             if (drc != 0) {
                 sqlite_context_result_error(context, SQLITE_ERROR, "Failed to decode during generation (%d: %s)", drc, llm_decode_error_string(drc));
-                goto error_sampler;
+                goto error;
             }
         }
     }
@@ -3239,16 +3261,12 @@ static void llm_text_run_vision (sqlite3_context *context, const char *text, int
     mtmd_input_chunks_free(chunks);
     sqlite3_free(prompt_with_markers);
     sqlite3_free(formatted_prompt);
-    if (!sampler_already_setup) llama_sampler_free(sampler);
+    if (owned_sampler) llama_sampler_free(owned_sampler);
     return;
 
-error_sampler:
-    if (!sampler_already_setup && ai->sampler) {
-        llama_sampler_free(ai->sampler);
-        ai->sampler = NULL;
-    }
 error:
     if (buffer_initialized) buffer_destroy(&buffer);
+    if (owned_sampler) llama_sampler_free(owned_sampler);
     if (bitmaps) {
         for (int i = 0; i < n_images; i++) if (bitmaps[i]) mtmd_bitmap_free(bitmaps[i]);
         sqlite3_free(bitmaps);
