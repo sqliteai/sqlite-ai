@@ -2172,6 +2172,16 @@ static sqlite3_module llm_chat = {
 static void llm_chat_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
 
+    // A conversation lives in two places: this struct and the KV cache. Dropping one
+    // without the other left prev_len back at 0 against a cache that was still full,
+    // which is why llm_chat_free() + llm_chat_create() could not recover from a full
+    // context. llm_chat_create() and llm_chat_restore() both come through here and
+    // both want an empty cache.
+    if (ai->ctx) {
+        llama_memory_t memory = llama_get_memory(ai->ctx);
+        if (memory) llama_memory_clear(memory, true);
+    }
+
     // reset UUID and cleanup chat related memory
     memset(ai->chat.uuid, 0, UUID_STR_MAXLEN);
 
@@ -2734,6 +2744,18 @@ static void llm_context_free (sqlite3_context *context, int argc, sqlite3_value 
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     if (ai->ctx) llama_free(ai->ctx);
     ai->ctx = NULL;
+
+    // prev_len is how much of the rendered transcript is already in the KV cache, so it
+    // belongs to the context rather than to the history: freeing the context makes the
+    // answer zero. Leaving it stale made the next turn send only the newest message into
+    // an empty cache, so the model silently lost the conversation while ai->chat.messages
+    // still claimed it. Reset, the next turn re-primes the whole transcript, which is
+    // what makes resizing a context mid-conversation work.
+    // The history itself is deliberately kept - that is what separates freeing a context
+    // from freeing a chat.
+    ai->chat.prev_len = 0;
+    ai->chat.token_count = 0;
+    memset(&ai->chat.batch, 0, sizeof(ai->chat.batch));
 }
 
 static bool llm_context_create_with_options (sqlite3_context *context, ai_context *ai, const char *options1, const char *options2) {

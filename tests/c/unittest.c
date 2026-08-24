@@ -169,6 +169,23 @@ static int exec_capture_error(const test_env *env, sqlite3 *db, const char *sql,
     return (rc == SQLITE_OK) ? 0 : 1;
 }
 
+// talks until the chat runs out of context; 0 once it has failed the way we expect
+static int fill_chat_context(const test_env *env, sqlite3 *db, const char *label) {
+    const char *turn = "SELECT llm_chat_respond('Tell me about computers.');";
+    for (int i = 0; i < 40; ++i) {
+        char err[256] = {0};
+        if (exec_capture_error(env, db, turn, err, sizeof(err)) == 0) continue;
+        if (strstr(err, "Context size exceeded") == NULL) {
+            fprintf(stderr, "[%s] expected the context guard to stop us, got: %s\n", label, err);
+            return 1;
+        }
+        if (env->verbose) printf("[%s] context full after %d turns: %s\n", label, i, err);
+        return 0;
+    }
+    fprintf(stderr, "[%s] context never filled\n", label);
+    return 1;
+}
+
 static int exec_select_rows(const test_env *env, sqlite3 *db, const char *sql, int *rows_out) {
     if (env->verbose) {
         printf("[SQL] %s\n", sql);
@@ -1524,6 +1541,166 @@ fail:
     return 1;
 }
 
+// Path A: llm_chat_free() must drop the conversation from the KV cache too, not just
+// from ai->chat. It used to leave the cache full, so "start a new chat" - the obvious
+// way to recover from a full context - failed with the very same error.
+static int test_chat_free_clears_kv_cache(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=256');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
+
+    if (fill_chat_context(env, db, "chat_free_clears_kv_cache") != 0) goto fail;
+
+    // a brand new chat must actually start from nothing
+    if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
+
+    int used = -1;
+    if (select_single_int(env, db, "SELECT llm_context_used();", &used) != 0) goto fail;
+    if (used > 0) {
+        fprintf(stderr, "[chat_free_clears_kv_cache] cache still holds %d tokens after llm_chat_free()\n", used);
+        goto fail;
+    }
+    if (exec_expect_ok(env, db, "SELECT llm_chat_respond('Hello');") != 0) goto fail;
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("chat_free_clears_kv_cache", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
+// Path B: llm_context_free() must reset prev_len, which tracks how much of the transcript
+// is in the KV cache. It used to survive the context it described, so the next turn sent
+// only the newest message into an empty cache and the model silently lost the
+// conversation while ai->chat.messages still claimed it. Reset, the transcript is
+// re-primed - which is what makes resizing a context mid-conversation work.
+static int test_context_free_replays_chat(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=1024');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
+
+    for (int i = 0; i < 3; ++i) {
+        if (exec_expect_ok(env, db, "SELECT llm_chat_respond('Tell me about computers.');") != 0) goto fail;
+    }
+    int used_before = 0;
+    if (select_single_int(env, db, "SELECT llm_context_used();", &used_before) != 0) goto fail;
+    if (used_before <= 0) {
+        fprintf(stderr, "[context_free_replays_chat] expected a populated cache, got %d\n", used_before);
+        goto fail;
+    }
+
+    // resize the context mid-conversation
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=2048');") != 0) goto fail;
+
+    int used_fresh = -1;
+    if (select_single_int(env, db, "SELECT llm_context_used();", &used_fresh) != 0) goto fail;
+    if (used_fresh > 0) {
+        fprintf(stderr, "[context_free_replays_chat] new context should start empty, holds %d\n", used_fresh);
+        goto fail;
+    }
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_respond('And what else?');") != 0) goto fail;
+    int used_after = 0;
+    if (select_single_int(env, db, "SELECT llm_context_used();", &used_after) != 0) goto fail;
+    if (env->verbose) printf("[context_free_replays_chat] used %d -> 0 -> %d\n", used_before, used_after);
+
+    // the whole transcript must be back, not just the newest message
+    if (used_after <= used_before) {
+        fprintf(stderr, "[context_free_replays_chat] transcript was not replayed: %d tokens before the "
+                        "resize, only %d after the next turn\n", used_before, used_after);
+        goto fail;
+    }
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("context_free_replays_chat", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
+// Path C: compaction. Save the conversation, drop the oldest turns with plain SQL, and
+// restore - llm_chat_restore() goes through llm_chat_free(), so the cache is cleared and
+// the trimmed transcript is replayed. No context juggling required, which is what this
+// used to need.
+static int test_chat_restore_compacts_context(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=256');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
+
+    if (fill_chat_context(env, db, "chat_restore_compacts_context") != 0) goto fail;
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_save('compaction');") != 0) goto fail;
+    int before = 0;
+    if (select_single_int(env, db, "SELECT count(*) FROM ai_chat_messages;", &before) != 0) goto fail;
+
+    // keep only the last two exchanges
+    if (exec_expect_ok(env, db, "DELETE FROM ai_chat_messages WHERE id NOT IN "
+                                "(SELECT id FROM ai_chat_messages ORDER BY id DESC LIMIT 4);") != 0) goto fail;
+    int after = 0;
+    if (select_single_int(env, db, "SELECT count(*) FROM ai_chat_messages;", &after) != 0) goto fail;
+    if (before <= after || after != 4) {
+        fprintf(stderr, "[chat_restore_compacts_context] prune did not take: %d -> %d\n", before, after);
+        goto fail;
+    }
+
+    // note: no llm_context_free() here - restore alone must be enough now
+    if (exec_expect_ok(env, db, "SELECT llm_chat_restore((SELECT uuid FROM ai_chat_history "
+                                "ORDER BY id DESC LIMIT 1));") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_respond('Carry on');") != 0) goto fail;
+    if (env->verbose) {
+        int used = 0;
+        if (select_single_int(env, db, "SELECT llm_context_used();", &used) == 0)
+            printf("[chat_restore_compacts_context] %d messages -> %d, cache now %d tokens\n", before, after, used);
+    }
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("chat_restore_compacts_context", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
 // Test chat vtab streaming produces tokens and saves response correctly across turns
 static int test_chat_vtab_multi_turn(const test_env *env) {
     sqlite3 *db = NULL;
@@ -2290,6 +2467,9 @@ static const test_case TESTS[] = {
     {"chat_create_free_cycle", test_chat_create_free_cycle},
     {"chat_recreate_after_conversation", test_chat_recreate_after_conversation},
     {"chat_context_full_is_recoverable", test_chat_context_full_is_recoverable},
+    {"chat_free_clears_kv_cache", test_chat_free_clears_kv_cache},
+    {"context_free_replays_chat", test_context_free_replays_chat},
+    {"chat_restore_compacts_context", test_chat_restore_compacts_context},
     {"chat_vtab_multi_turn", test_chat_vtab_multi_turn},
     {"chat_save_restore_roundtrip", test_chat_save_restore_roundtrip},
     {"chat_system_prompt_clear", test_chat_system_prompt_clear},
