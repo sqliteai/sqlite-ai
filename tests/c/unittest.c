@@ -159,6 +159,16 @@ static int install_seeded_chat_sampler(const test_env *env, sqlite3 *db) {
     return 0;
 }
 
+// like exec_expect_ok, but hands back the error text so a test can compare two failures
+static int exec_capture_error(const test_env *env, sqlite3 *db, const char *sql, char *err, size_t errlen) {
+    if (env->verbose) printf("[SQL] %s\n", sql);
+    char *errmsg = NULL;
+    int rc = sqlite3_exec(db, sql, NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK && err && errlen) snprintf(err, errlen, "%s", errmsg ? errmsg : sqlite3_errmsg(db));
+    if (errmsg) sqlite3_free(errmsg);
+    return (rc == SQLITE_OK) ? 0 : 1;
+}
+
 static int exec_select_rows(const test_env *env, sqlite3 *db, const char *sql, int *rows_out) {
     if (env->verbose) {
         printf("[SQL] %s\n", sql);
@@ -1346,6 +1356,89 @@ fail:
     return 1;
 }
 
+// Regression: running a chat out of context used to corrupt it. The turn bailed out of
+// llm_chat_run() before llm_chat_save_response(), so the user message stayed in the
+// history with no assistant reply and prev_len was never advanced - which made the next
+// turn re-send the stranded message, so the reported requirement grew on every retry
+// (266, 276, 286, 296 ...) and the chat could never be used again. The guard also
+// treated llama_memory_seq_pos_max() (a position) as an occupancy count, so it let one
+// over-large batch through for llama_decode() to reject instead.
+static int test_chat_context_full_is_recoverable(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=256');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
+
+    // talk until the context runs out, then keep going: the failures are the point
+    const char *turn = "SELECT llm_chat_respond('Tell me about computers.');";
+    char first_err[256] = {0}, last_err[256] = {0};
+    int ok_turns = 0, failed_turns = 0;
+    for (int i = 0; i < 40 && failed_turns < 3; ++i) {
+        char err[256] = {0};
+        if (exec_capture_error(env, db, turn, err, sizeof(err)) == 0) {
+            if (failed_turns == 0) ok_turns++;
+            continue;
+        }
+        if (failed_turns == 0) snprintf(first_err, sizeof(first_err), "%s", err);
+        snprintf(last_err, sizeof(last_err), "%s", err);
+        failed_turns++;
+    }
+
+    if (ok_turns == 0 || failed_turns < 3) {
+        fprintf(stderr, "[chat_context_full_is_recoverable] wanted some good turns then 3 failures, "
+                        "got %d good and %d failed\n", ok_turns, failed_turns);
+        goto fail;
+    }
+    if (env->verbose) printf("[chat_context_full_is_recoverable] %d turns fit, then: %s\n", ok_turns, first_err);
+
+    // the guard must catch it, not llama_decode() one token later
+    if (strstr(first_err, "Context size exceeded") == NULL) {
+        fprintf(stderr, "[chat_context_full_is_recoverable] expected the context guard to report it, got: %s\n", first_err);
+        goto fail;
+    }
+
+    // every later attempt must report the SAME requirement. A stranded user turn used to
+    // be re-sent on each retry, so this number climbed until the chat was unusable.
+    if (strcmp(first_err, last_err) != 0) {
+        fprintf(stderr, "[chat_context_full_is_recoverable] failure grew across retries:\n  first: %s\n  last:  %s\n",
+                first_err, last_err);
+        goto fail;
+    }
+
+    // and the history must not end on an orphaned user turn
+    if (exec_expect_ok(env, db, "SELECT llm_chat_save('context full');") != 0) goto fail;
+    ai_chat_message_row rows[128];
+    int count = 0;
+    if (fetch_ai_chat_messages(env, db, rows, 128, &count) != 0) goto fail;
+    if (count < 2) {
+        fprintf(stderr, "[chat_context_full_is_recoverable] expected saved messages, got %d\n", count);
+        goto fail;
+    }
+    if (strcmp(rows[count - 1].role, "assistant") != 0) {
+        fprintf(stderr, "[chat_context_full_is_recoverable] history ends on a '%s' turn with no reply\n",
+                rows[count - 1].role);
+        goto fail;
+    }
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("chat_context_full_is_recoverable", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
 // Test chat vtab streaming produces tokens and saves response correctly across turns
 static int test_chat_vtab_multi_turn(const test_env *env) {
     sqlite3 *db = NULL;
@@ -2110,6 +2203,7 @@ static const test_case TESTS[] = {
     {"chat_system_prompt_after_first_response", test_chat_system_prompt_after_first_response},
     {"chat_create_free_cycle", test_chat_create_free_cycle},
     {"chat_recreate_after_conversation", test_chat_recreate_after_conversation},
+    {"chat_context_full_is_recoverable", test_chat_context_full_is_recoverable},
     {"chat_vtab_multi_turn", test_chat_vtab_multi_turn},
     {"chat_save_restore_roundtrip", test_chat_save_restore_roundtrip},
     {"chat_system_prompt_clear", test_chat_system_prompt_clear},
