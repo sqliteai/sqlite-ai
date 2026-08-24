@@ -607,6 +607,81 @@ fail:
     return 1;
 }
 
+// Regression: an explicit context_size=512 collided with the value
+// llama_context_default_params() uses for n_ctx, so it was read as "the caller did
+// not ask" and silently replaced by the model's training window - 32768 for the test
+// model, 64x what was requested.
+static int test_context_size_is_honoured(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+
+    int n_ctx_train = 0;
+    if (select_single_int(env, db, "SELECT llm_model_n_ctx_train();", &n_ctx_train) != 0) goto fail;
+    if (n_ctx_train <= 1024) {
+        fprintf(stderr, "[context_size_is_honoured] model trains at %d, too small to tell a "
+                        "honoured context_size from an auto-sized one\n", n_ctx_train);
+        goto fail;
+    }
+
+    // llama pads n_ctx up to a multiple of 256, so only exact multiples compare equal.
+    // 512 is the regression; the others guard against over-correcting.
+    const int sizes[] = {256, 512, 1024};
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
+        snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_context_create_chat('context_size=%d');", sizes[i]);
+        if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+        int n_ctx = 0;
+        if (select_single_int(env, db, "SELECT llm_context_size();", &n_ctx) != 0) goto fail;
+        if (env->verbose) printf("[context_size_is_honoured] asked %d, got %d\n", sizes[i], n_ctx);
+        if (n_ctx != sizes[i]) {
+            fprintf(stderr, "[context_size_is_honoured] context_size=%d produced n_ctx=%d\n", sizes[i], n_ctx);
+            goto fail;
+        }
+        if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    }
+
+    // n_ctx= is the other spelling of the same thing and hit the same collision
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('n_ctx=512');") != 0) goto fail;
+    int n_ctx = 0;
+    if (select_single_int(env, db, "SELECT llm_context_size();", &n_ctx) != 0) goto fail;
+    if (n_ctx != 512) {
+        fprintf(stderr, "[context_size_is_honoured] n_ctx=512 produced n_ctx=%d\n", n_ctx);
+        goto fail;
+    }
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+
+    // omitting it still auto-sizes to the model's training window
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat();") != 0) goto fail;
+    if (select_single_int(env, db, "SELECT llm_context_size();", &n_ctx) != 0) goto fail;
+    if (n_ctx != n_ctx_train) {
+        fprintf(stderr, "[context_size_is_honoured] no context_size produced n_ctx=%d, expected %d\n", n_ctx, n_ctx_train);
+        goto fail;
+    }
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+
+    // and context_size=0 asks for that explicitly
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=0');") != 0) goto fail;
+    if (select_single_int(env, db, "SELECT llm_context_size();", &n_ctx) != 0) goto fail;
+    if (n_ctx != n_ctx_train) {
+        fprintf(stderr, "[context_size_is_honoured] context_size=0 produced n_ctx=%d, expected %d\n", n_ctx, n_ctx_train);
+        goto fail;
+    }
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("context_size_is_honoured", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
 static int test_document_ingestion_flow(const test_env *env) {
     sqlite3 *db = NULL;
     if (open_db_and_load(env, &db) != SQLITE_OK) {
@@ -2093,6 +2168,7 @@ static const test_case TESTS[] = {
     {"llm_embed_generate_basic", test_llm_embed_generate_basic},
     {"llm_embedding_then_chat", test_llm_embedding_then_chat},
     {"llm_context_size_errors", test_llm_context_size_errors},
+    {"context_size_is_honoured", test_context_size_is_honoured},
     {"document_ingestion_flow", test_document_ingestion_flow},
     {"llm_sampler_roundtrip", test_llm_sampler_roundtrip},
     {"chat_default_sampler_autocreate", test_chat_default_sampler_autocreate},
