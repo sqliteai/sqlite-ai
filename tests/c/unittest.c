@@ -1377,39 +1377,49 @@ static int test_chat_context_full_is_recoverable(const test_env *env) {
 
     // talk until the context runs out, then keep going: the failures are the point
     const char *turn = "SELECT llm_chat_respond('Tell me about computers.');";
-    char first_err[256] = {0}, last_err[256] = {0};
+    #define MAX_FAILURES 4
+    char errs[MAX_FAILURES][256] = {{0}};
     int ok_turns = 0, failed_turns = 0;
-    for (int i = 0; i < 40 && failed_turns < 3; ++i) {
+    for (int i = 0; i < 40 && failed_turns < MAX_FAILURES; ++i) {
         char err[256] = {0};
         if (exec_capture_error(env, db, turn, err, sizeof(err)) == 0) {
             if (failed_turns == 0) ok_turns++;
             continue;
         }
-        if (failed_turns == 0) snprintf(first_err, sizeof(first_err), "%s", err);
-        snprintf(last_err, sizeof(last_err), "%s", err);
+        snprintf(errs[failed_turns], sizeof(errs[0]), "%s", err);
         failed_turns++;
     }
 
-    if (ok_turns == 0 || failed_turns < 3) {
-        fprintf(stderr, "[chat_context_full_is_recoverable] wanted some good turns then 3 failures, "
-                        "got %d good and %d failed\n", ok_turns, failed_turns);
+    if (ok_turns == 0 || failed_turns < MAX_FAILURES) {
+        fprintf(stderr, "[chat_context_full_is_recoverable] wanted some good turns then %d failures, "
+                        "got %d good and %d failed\n", MAX_FAILURES, ok_turns, failed_turns);
         goto fail;
     }
-    if (env->verbose) printf("[chat_context_full_is_recoverable] %d turns fit, then: %s\n", ok_turns, first_err);
+    if (env->verbose) {
+        printf("[chat_context_full_is_recoverable] %d turns fit, then:\n", ok_turns);
+        for (int i = 0; i < failed_turns; ++i) printf("    #%d %s\n", i + 1, errs[i]);
+    }
 
     // the guard must catch it, not llama_decode() one token later
-    if (strstr(first_err, "Context size exceeded") == NULL) {
-        fprintf(stderr, "[chat_context_full_is_recoverable] expected the context guard to report it, got: %s\n", first_err);
+    if (strstr(errs[0], "Context size exceeded") == NULL) {
+        fprintf(stderr, "[chat_context_full_is_recoverable] expected the context guard to report it, got: %s\n", errs[0]);
         goto fail;
     }
 
-    // every later attempt must report the SAME requirement. A stranded user turn used to
-    // be re-sent on each retry, so this number climbed until the chat was unusable.
-    if (strcmp(first_err, last_err) != 0) {
-        fprintf(stderr, "[chat_context_full_is_recoverable] failure grew across retries:\n  first: %s\n  last:  %s\n",
-                first_err, last_err);
-        goto fail;
+    // Once retrying, every attempt must report the SAME requirement: each one sends the
+    // same user message against the same full cache. A stranded user turn used to be
+    // re-sent on top, so the number climbed by a turn's worth of tokens every time.
+    // The FIRST failure is excluded on purpose - it can land mid-generation, where the
+    // batch is a single token, so it legitimately reports a different number from the
+    // prompt-batch failures that follow.
+    for (int i = 2; i < failed_turns; ++i) {
+        if (strcmp(errs[1], errs[i]) != 0) {
+            fprintf(stderr, "[chat_context_full_is_recoverable] failure grew across retries:\n");
+            for (int j = 0; j < failed_turns; ++j) fprintf(stderr, "    #%d %s\n", j + 1, errs[j]);
+            goto fail;
+        }
     }
+    #undef MAX_FAILURES
 
     // and the history must not end on an orphaned user turn
     if (exec_expect_ok(env, db, "SELECT llm_chat_save('context full');") != 0) goto fail;
