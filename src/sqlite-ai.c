@@ -511,8 +511,8 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
     if (KEY_MATCHES(key, key_len, OPTION_KEY_CONTEXT_SIZE)) {
         int value = (int)strtol(buffer, NULL, 0);
         if (value >= 0) {
-            options->n_ctx = value;
-            options->n_batch = value;
+            options->n_ctx = value;                     // 0 = use the model's training window
+            if (value > 0) options->n_batch = value;    // never drive n_batch to 0
         }
         return true;
     }
@@ -2738,6 +2738,14 @@ static void llm_context_free (sqlite3_context *context, int argc, sqlite3_value 
 
 static bool llm_context_create_with_options (sqlite3_context *context, ai_context *ai, const char *options1, const char *options2) {
     struct llama_context_params ctx_params = llama_context_default_params();
+
+    // n_ctx = 0 tells llama.cpp to use the model's training window. Start from it so
+    // that "the caller did not ask for a context size" is an explicit sentinel rather
+    // than something inferred after the fact from the value: llama's own default is
+    // 512, so an explicit context_size=512 used to be indistinguishable from unset and
+    // was silently replaced by n_ctx_train.
+    ctx_params.n_ctx = 0;
+
     if (parse_keyvalue_string(ai, options1, llm_context_options_callback, &ctx_params) == false) {
         sqlite_context_result_error(context, SQLITE_ERROR, "An error occurred while parsing options (%s)", options1);
         return false;
@@ -2754,13 +2762,6 @@ static bool llm_context_create_with_options (sqlite3_context *context, ai_contex
     if (ctx_params.embeddings && ai->options.embedding.type == 0) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Embedding type (embedding_type) must be specified in the create context funtion");
         return false;
-    }
-
-    // auto-size n_ctx to the model's training window when no explicit context_size was set
-    // llama_context_default_params() sets n_ctx=512; setting n_ctx=0 tells llama.cpp to use n_ctx_train
-    struct llama_context_params defaults = llama_context_default_params();
-    if (ai->model && ctx_params.n_ctx == defaults.n_ctx) {
-        ctx_params.n_ctx = 0;
     }
 
     // for embedding contexts, clamp n_ctx to n_ctx_train to avoid position overflow

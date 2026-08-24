@@ -108,8 +108,8 @@ The following keys are available in context_settings:
 
 | Key                      | Type     | Meaning                                                          |
 | ------------------------ | -------- | ---------------------------------------------------------------- |
-| `context_size`           | `number` | Equivalent to n_ctx = N and n_batch = N.                         |
-| `n_ctx`                  | `number` | Text context length (tokens). `0` = from model.                  |
+| `context_size`           | `number` | Equivalent to `n_ctx = N` and `n_batch = N`. `0` = use the model's training window. |
+| `n_ctx`                  | `number` | Text context length (tokens). `0` = use the model's training window.               |
 | `n_batch`                | `number` | **Logical** max batch size submitted to `llama_decode`.          |
 | `n_ubatch`               | `number` | **Physical** max micro-batch size.                               |
 | `n_seq_max`              | `number` | Max concurrent sequences (parallel states for recurrent models). |
@@ -199,7 +199,10 @@ SELECT llm_context_create_embedding();
 **Description:**
 Creates a new inference context specifically set for chat conversation.
 
-It is equivalent to `SELECT llm_context_create('context_size=4096');`
+It applies no context settings of its own, so anything you do not pass is
+llama.cpp's default — in particular the context length defaults to the model's
+training window (`llm_model_n_ctx_train()`), not to a fixed size. Pass
+`context_size` to bound it, and use `llm_context_size()` to confirm what you got.
 
 Context must explicitly created before performing any AI operation!
 
@@ -220,7 +223,10 @@ SELECT llm_context_create_chat();
 **Description:**
 Creates a new inference context specifically set for text generation.
 
-It is equivalent to `SELECT llm_context_create('context_size=4096');`
+It applies no context settings of its own, so anything you do not pass is
+llama.cpp's default — in particular the context length defaults to the model's
+training window (`llm_model_n_ctx_train()`), not to a fixed size. Pass
+`context_size` to bound it, and use `llm_context_size()` to confirm what you got.
 
 Context must explicitly created before performing any AI operation!
 
