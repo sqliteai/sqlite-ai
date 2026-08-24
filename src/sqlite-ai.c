@@ -835,6 +835,9 @@ void *ai_create (sqlite3 *db) {
     return ai;
 }
 
+static void ai_context_release (ai_context *ai);
+static void ai_chat_release (ai_context *ai);
+
 static void ai_free (void *ctx, bool free_ai, bool free_llm, bool free_audio) {
     if (!ctx) return;
     ai_context *ai = (ai_context *)ctx;
@@ -855,12 +858,19 @@ static void ai_free (void *ctx, bool free_ai, bool free_llm, bool free_audio) {
         if (ai->sampler) llama_sampler_free(ai->sampler);
         ai->sampler = NULL;
         if (ai->ctx) llama_set_adapters_lora(ai->ctx, NULL, 0, NULL);
-        if (ai->ctx) llama_free(ai->ctx);
+
+        // A conversation outlives a model swap on purpose: prev_len is reset with the
+        // context below, so the next turn replays the whole transcript through the new
+        // model's template. It only becomes unreachable when the connection goes away,
+        // and nothing else frees it - llm_chat_free() is a SQL function the caller may
+        // never invoke. Must run before the context: clearing the KV cache needs it.
+        if (free_ai) ai_chat_release(ai);
+        ai_context_release(ai);
+
         if (ai->model) llama_model_free(ai->model);
         llm_options_init(&ai->options);
         
         ai->model = NULL;
-        ai->ctx = NULL;
         ai->sampler = NULL;
     }
     
@@ -998,6 +1008,49 @@ void llm_messages_free (ai_messages *list) {
     list->items = NULL;
     list->count = 0;
     list->capacity = 0;
+}
+
+// Releases the llama context and everything that describes its contents. prev_len is
+// how much of the rendered transcript is already in the KV cache, so it cannot outlive
+// that cache; the message history is deliberately left alone - that belongs to the chat,
+// and keeping it is what lets the next turn replay the conversation into a new context.
+static void ai_context_release (ai_context *ai) {
+    if (ai->ctx) llama_free(ai->ctx);
+    ai->ctx = NULL;
+
+    ai->chat.prev_len = 0;
+    ai->chat.token_count = 0;
+    memset(&ai->chat.batch, 0, sizeof(ai->chat.batch));
+}
+
+// Releases the conversation: its history, its buffers, and its tokens in the KV cache.
+// A conversation lives in both places, so dropping one without the other leaves prev_len
+// disagreeing with the cache.
+static void ai_chat_release (ai_context *ai) {
+    if (ai->ctx) {
+        llama_memory_t memory = llama_get_memory(ai->ctx);
+        if (memory) llama_memory_clear(memory, true);
+    }
+
+    memset(ai->chat.uuid, 0, UUID_STR_MAXLEN);
+
+    buffer_destroy(&ai->chat.response);
+    buffer_destroy(&ai->chat.formatted);
+    llm_messages_free(&ai->chat.messages);
+
+    if (ai->chat.tokens) sqlite3_free(ai->chat.tokens);
+    ai->chat.tokens = NULL;
+    ai->chat.ntokens = 0;
+
+    if (ai->chat.prompt) sqlite3_free(ai->chat.prompt);
+    ai->chat.prompt = NULL;
+
+    ai->chat.prev_len = 0;
+    ai->chat.template = NULL;
+    ai->chat.vocab = NULL;
+    ai->chat.token_count = 0;
+    // batch.token pointed into the tokens buffer just freed
+    memset(&ai->chat.batch, 0, sizeof(ai->chat.batch));
 }
 
 // MARK: - Text Embedding and Normalization -
@@ -1833,10 +1886,24 @@ static bool llm_chat_generate_response (ai_context *ai, ai_cursor *c, bool *is_e
         return false;
     }
     
-    int32_t drc = llama_decode(ctx, batch);
-    if (drc != 0) {
-        sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to decode prompt batch (%d: %s)", drc, llm_decode_error_string(drc));
-        return false;
+    // llama_decode() asserts n_tokens <= n_batch and aborts the process if it is not,
+    // so a prompt longer than n_batch has to be fed in chunks - llm_text_run() already
+    // does this. Only the last chunk's logits are sampled from, so the earlier ones can
+    // go through untouched. n_batch only tracks n_ctx when the caller passes
+    // context_size, so a big n_ctx with the default 2048 n_batch reaches here easily,
+    // and a replayed transcript is a single batch of whatever length the chat has.
+    const int32_t n_batch_max = (int32_t)llama_n_batch(ctx);
+    for (int32_t decoded = 0; decoded < batch.n_tokens; ) {
+        int32_t chunk = batch.n_tokens - decoded;
+        if (chunk > n_batch_max) chunk = n_batch_max;
+
+        struct llama_batch sub = llama_batch_get_one(batch.token + decoded, chunk);
+        int32_t drc = llama_decode(ctx, sub);
+        if (drc != 0) {
+            sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Failed to decode prompt batch (%d: %s)", drc, llm_decode_error_string(drc));
+            return false;
+        }
+        decoded += chunk;
     }
     
     // sample next token
@@ -2170,36 +2237,7 @@ static sqlite3_module llm_chat = {
 // MARK: -
 
 static void llm_chat_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
-
-    // A conversation lives in two places: this struct and the KV cache. Dropping one
-    // without the other left prev_len back at 0 against a cache that was still full,
-    // which is why llm_chat_free() + llm_chat_create() could not recover from a full
-    // context. llm_chat_create() and llm_chat_restore() both come through here and
-    // both want an empty cache.
-    if (ai->ctx) {
-        llama_memory_t memory = llama_get_memory(ai->ctx);
-        if (memory) llama_memory_clear(memory, true);
-    }
-
-    // reset UUID and cleanup chat related memory
-    memset(ai->chat.uuid, 0, UUID_STR_MAXLEN);
-
-    buffer_destroy(&ai->chat.response);
-    buffer_destroy(&ai->chat.formatted);
-    llm_messages_free(&ai->chat.messages);
-
-    if (ai->chat.tokens) sqlite3_free(ai->chat.tokens);
-    ai->chat.tokens = NULL;
-    ai->chat.ntokens = 0;
-
-    if (ai->chat.prompt) sqlite3_free(ai->chat.prompt);
-    ai->chat.prompt = NULL;
-    ai->chat.prev_len = 0;
-
-    ai->chat.template = NULL;
-    ai->chat.vocab = NULL;
-    ai->chat.token_count = 0;
+    ai_chat_release((ai_context *)sqlite3_user_data(context));
 }
 
 static void llm_chat_create (sqlite3_context *context, int argc, sqlite3_value **argv) {
@@ -2741,21 +2779,7 @@ static void llm_sampler_create (sqlite3_context *context, int argc, sqlite3_valu
 }
 
 static void llm_context_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    if (ai->ctx) llama_free(ai->ctx);
-    ai->ctx = NULL;
-
-    // prev_len is how much of the rendered transcript is already in the KV cache, so it
-    // belongs to the context rather than to the history: freeing the context makes the
-    // answer zero. Leaving it stale made the next turn send only the newest message into
-    // an empty cache, so the model silently lost the conversation while ai->chat.messages
-    // still claimed it. Reset, the next turn re-primes the whole transcript, which is
-    // what makes resizing a context mid-conversation work.
-    // The history itself is deliberately kept - that is what separates freeing a context
-    // from freeing a chat.
-    ai->chat.prev_len = 0;
-    ai->chat.token_count = 0;
-    memset(&ai->chat.batch, 0, sizeof(ai->chat.batch));
+    ai_context_release((ai_context *)sqlite3_user_data(context));
 }
 
 static bool llm_context_create_with_options (sqlite3_context *context, ai_context *ai, const char *options1, const char *options2) {

@@ -1701,6 +1701,146 @@ fail:
     return 1;
 }
 
+// A model swap frees the context through ai_free(), which used to bypass
+// llm_context_free() entirely - so prev_len survived the cache it described and the
+// next turn sent only its tail into an empty one. The conversation is deliberately kept
+// across the swap, so it must be replayed through the new model instead.
+static int test_chat_survives_model_reload(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=2048');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
+
+    for (int i = 0; i < 2; ++i) {
+        if (exec_expect_ok(env, db, "SELECT llm_chat_respond('Tell me about computers.');") != 0) goto fail;
+    }
+    int used_before = 0;
+    if (select_single_int(env, db, "SELECT llm_context_used();", &used_before) != 0) goto fail;
+    if (used_before <= 0) {
+        fprintf(stderr, "[chat_survives_model_reload] expected a populated cache, got %d\n", used_before);
+        goto fail;
+    }
+
+    // note: no llm_context_free() - ai_free() takes the context down from under us,
+    // which is exactly the path that used to leave prev_len behind
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=2048');") != 0) goto fail;
+
+    int used_fresh = -1;
+    if (select_single_int(env, db, "SELECT llm_context_used();", &used_fresh) != 0) goto fail;
+    if (used_fresh > 0) {
+        fprintf(stderr, "[chat_survives_model_reload] reloaded context should start empty, holds %d\n", used_fresh);
+        goto fail;
+    }
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_respond('And what else?');") != 0) goto fail;
+    int used_after = 0;
+    if (select_single_int(env, db, "SELECT llm_context_used();", &used_after) != 0) goto fail;
+    if (env->verbose) printf("[chat_survives_model_reload] used %d -> 0 -> %d\n", used_before, used_after);
+    if (used_after <= used_before) {
+        fprintf(stderr, "[chat_survives_model_reload] transcript was not replayed: %d tokens before the "
+                        "reload, only %d after the next turn\n", used_before, used_after);
+        goto fail;
+    }
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("chat_survives_model_reload", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
+// llm_chat_free() is a SQL function a caller may simply never invoke, and it used to be
+// the only thing that released the history, the buffers, the prompt and the token array.
+// Closing the connection leaked all of it - 29920 bytes for this conversation. Every
+// other test calls llm_chat_free() explicitly, which is why nothing caught it.
+static int test_chat_released_on_connection_close(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=1024');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_respond('Hello');") != 0) goto fail;
+
+    // deliberately no llm_chat_free(), no llm_context_free(), no llm_model_free():
+    // closing the connection has to reclaim everything on its own
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("chat_released_on_connection_close", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
+// llama_decode() asserts n_tokens <= n_batch and aborts the process, and the chat path
+// submitted the whole prompt as one batch. n_batch only follows n_ctx when the caller
+// passes context_size, so n_ctx=4096 leaves n_batch at llama's default of 2048 and a
+// long enough prompt kills the process. Replaying a transcript into a fresh context
+// makes the same batch, which is why this matters more since prev_len is reset.
+static int test_chat_prompt_larger_than_n_batch(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+    // n_ctx only: n_batch stays at 2048
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('n_ctx=4096');") != 0) goto fail;
+
+    int n_ctx = 0;
+    if (select_single_int(env, db, "SELECT llm_context_size();", &n_ctx) != 0) goto fail;
+    if (n_ctx != 4096) {
+        fprintf(stderr, "[chat_prompt_larger_than_n_batch] wanted n_ctx 4096, got %d\n", n_ctx);
+        goto fail;
+    }
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
+
+    // ~3000 tokens of prompt against a 2048 batch: this used to abort the process
+    if (exec_expect_ok(env, db, "SELECT llm_chat_respond("
+                                "replace(hex(zeroblob(1500)), '0', 'hello '));") != 0) goto fail;
+    int used = 0;
+    if (select_single_int(env, db, "SELECT llm_context_used();", &used) != 0) goto fail;
+    if (env->verbose) printf("[chat_prompt_larger_than_n_batch] cache holds %d tokens\n", used);
+    if (used <= 2048) {
+        fprintf(stderr, "[chat_prompt_larger_than_n_batch] expected more than one batch to be "
+                        "decoded, cache holds only %d tokens\n", used);
+        goto fail;
+    }
+
+    if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("chat_prompt_larger_than_n_batch", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
 // Test chat vtab streaming produces tokens and saves response correctly across turns
 static int test_chat_vtab_multi_turn(const test_env *env) {
     sqlite3 *db = NULL;
@@ -2470,6 +2610,9 @@ static const test_case TESTS[] = {
     {"chat_free_clears_kv_cache", test_chat_free_clears_kv_cache},
     {"context_free_replays_chat", test_context_free_replays_chat},
     {"chat_restore_compacts_context", test_chat_restore_compacts_context},
+    {"chat_survives_model_reload", test_chat_survives_model_reload},
+    {"chat_released_on_connection_close", test_chat_released_on_connection_close},
+    {"chat_prompt_larger_than_n_batch", test_chat_prompt_larger_than_n_batch},
     {"chat_vtab_multi_turn", test_chat_vtab_multi_turn},
     {"chat_save_restore_roundtrip", test_chat_save_restore_roundtrip},
     {"chat_system_prompt_clear", test_chat_system_prompt_clear},
