@@ -14,8 +14,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "aiBinary",
-            url: "https://github.com/sqliteai/sqlite-ai/releases/download/1.0.5/ai-apple-xcframework-1.0.5.zip",
-            checksum: "45b30694627d03bce68a5e79804822e61fce0b14ceb0723ecf7bd3a7dc59eb69"
+            url: "https://github.com/sqliteai/sqlite-ai/releases/download/1.0.6/ai-apple-xcframework-1.0.6.zip",
+            checksum: "64ecede326e1fb61f9cf47acea77f4aea5bef8b5ddd67aed40fa2ca184f604d7"
         ),
         .target(
             name: "ai",
