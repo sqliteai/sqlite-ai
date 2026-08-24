@@ -1821,9 +1821,13 @@ static bool llm_chat_generate_response (ai_context *ai, ai_cursor *c, bool *is_e
     llama_batch batch = ai->chat.batch;
     char *tok = ai->chat.token_text;
     
-    // check context space
-    uint32_t n_ctx = llama_n_ctx(ctx);
-    int32_t n_ctx_used = llama_memory_seq_pos_max(llama_get_memory(ctx), 0);
+    // check context space. seq_pos_max() is the highest position in the sequence, so
+    // occupancy is that + 1; treating it as a count let exactly one over-large batch
+    // through for llama_decode() to reject with "could not find a KV slot" instead.
+    // Both sides are signed: the comparison used to promote to unsigned, so an empty
+    // cache (seq_pos_max == -1) and a zero-token batch tripped the guard falsely.
+    int32_t n_ctx = (int32_t)llama_n_ctx(ctx);
+    int32_t n_ctx_used = llama_memory_seq_pos_max(llama_get_memory(ctx), 0) + 1;
     if (n_ctx_used + batch.n_tokens > n_ctx) {
         sqlite_common_set_error (ai->context, ai->vtab, SQLITE_ERROR, "Context size exceeded (%d, %d)", n_ctx, n_ctx_used + batch.n_tokens);
         return false;
@@ -1990,7 +1994,17 @@ static bool llm_chat_run (ai_context *ai, ai_cursor *c, const char *user_prompt)
     // do not stream response and incrementally build the buffer
     bool is_eog = false;
     while (1) {
-        if (!llm_chat_generate_response (ai, NULL, &is_eog)) return false;
+        if (!llm_chat_generate_response (ai, NULL, &is_eog)) {
+            // The turn failed part-way. The user message is already in the history and
+            // its tokens are already in the KV cache, so commit whatever was generated
+            // before reporting: leaving the turn half-applied strands the user message
+            // with no assistant reply and leaves prev_len stale, which makes the delta
+            // for the *next* turn re-include it and fail too. The streaming cursor path
+            // already saves on close for the same reason. Errors from the save itself
+            // are allowed to replace the original message - they are worth reporting.
+            llm_chat_save_response(ai, messages, template);
+            return false;
+        }
         if (is_eog) break;
     }
     
