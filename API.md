@@ -5,6 +5,66 @@ These functions enable loading and interacting with LLMs, configuring samplers, 
 
 ---
 
+## Lifecycle: what each `*_free()` releases
+
+A connection holds four things — a model, an inference context (which owns the KV
+cache), a sampler, and a chat (the message history). They are released
+independently, and releasing one does not necessarily release the others.
+
+| you call | model | context / KV cache | sampler | chat history |
+| ---------------------------- | ------------ | ------------------ | ---------- | ------------ |
+| `llm_model_load()` (again)    | replaced     | freed              | **freed**  | **kept**     |
+| `llm_model_free()`            | freed        | freed              | **freed**  | **kept**     |
+| `llm_context_free()`          | kept         | freed              | kept       | **kept**     |
+| `llm_chat_free()`             | kept         | **cache cleared**  | kept       | freed        |
+| closing the connection        | freed        | freed              | freed      | freed        |
+
+Two consequences are worth knowing:
+
+**A conversation survives a model switch.** The history is not tied to a model, so
+after loading a new one the next `llm_chat_respond()` replays the whole transcript
+through the new model's chat template before answering. That first turn therefore
+costs one full prompt evaluation, and it fails if the transcript no longer fits the
+new context. To start clean instead, call `llm_chat_free()` first:
+
+```sql
+SELECT llm_chat_save('before switching model');   -- optional: keep a copy
+SELECT llm_chat_free();                           -- drop history and clear the cache
+SELECT llm_model_load('/path/to/other-model.gguf');
+SELECT llm_context_create_chat('context_size=4096');
+SELECT llm_sampler_create();                      -- the model load released the old one
+SELECT llm_sampler_init_temp(0.8);
+SELECT llm_sampler_init_dist(42);
+SELECT llm_chat_respond('Hello');
+```
+
+**A sampler never survives a model load or free.** A sampler built with
+`llm_sampler_init_grammar()` holds a reference to the model's vocabulary, so it
+cannot outlive it. Rebuild the chain after loading a model; if you never configured
+one, a default is created for you.
+
+### Recovering from a full context
+
+When a chat fills its context, `llm_chat_respond()` returns
+`Context size exceeded`. The turn is not lost — whatever was generated is kept and
+the conversation stays usable — but the context is full, so every later turn returns
+the same error until you make room. Any of these works:
+
+- **Start over** — `llm_chat_free()` then carry on; the cache is cleared with it.
+- **Enlarge the context** — `llm_context_free()` then
+  `llm_context_create_chat('context_size=...')` with a bigger window. The history is
+  kept and replayed into it.
+- **Compact** — the history is an ordinary table, so trim it with SQL and restore:
+
+  ```sql
+  SELECT llm_chat_save('before compaction');
+  DELETE FROM ai_chat_messages
+   WHERE id NOT IN (SELECT id FROM ai_chat_messages ORDER BY id DESC LIMIT 8);
+  SELECT llm_chat_restore((SELECT uuid FROM ai_chat_history ORDER BY id DESC LIMIT 1));
+  ```
+
+---
+
 ## `ai_version()`
 
 **Returns:** `TEXT`
@@ -44,6 +104,11 @@ SELECT ai_log_info(1);
 Loads a GGUF model from the specified file path with optional comma separated key=value configuration.
 If no options are provided the following default value is used: `gpu_layers=99`
 
+Loading a model replaces whatever was loaded before: the previous model, its
+inference context and the sampler are all released. The chat history is **kept**, so
+an ongoing conversation carries over to the new model — call `llm_chat_free()` first
+if you want it dropped. See [Lifecycle](#lifecycle-what-each-_free-releases).
+
 The following keys are available:
 ```
 gpu_layers=N       (N is the number of layers to store in VRAM)
@@ -70,6 +135,9 @@ SELECT llm_model_load('./models/llama.gguf', 'gpu_layers=99');
 
 **Description:**
 Unloads the current model and frees associated memory.
+Also releases the inference context and the sampler, since both are tied to the model.
+The chat history is **kept** — load another model and the conversation continues.
+See [Lifecycle](#lifecycle-what-each-_free-releases).
 
 **Example:**
 
@@ -102,7 +170,7 @@ The following keys are available in context_settings:
 | `json_output`           | `1 or 0`                                   | Force JSON output in embedding generation (default to 0). |
 | `max_tokens`            | `number`                                   | Set a maximum number of tokens in input. If input is too large then an error is returned. |
 | `n_predict`             | `number`                                   | Control the maximum number of tokens generated during text generation.                    |
-| `embedding_type`        | `FLOAT32, FLOAT16, BFLOAT16, UINT8, INT8`  | Set the model native type, mandatory during embedding generation.                   |
+| `embedding_type`        | `FLOAT32, FLOAT16, FLOATB16, UINT8, INT8`  | Set the model native type. **Required** for embedding contexts — omitting it, or passing an unrecognised name, fails with *"Embedding type (embedding_type) must be specified in the create context function"*. Note the spelling `FLOATB16`, not `BFLOAT16`. |
 
 ### Core sizing & threading
 
@@ -243,7 +311,10 @@ SELECT llm_context_create_textgen();
 **Returns:** `NULL`
 
 **Description:**
-Frees the current inference context.
+Frees the current inference context and its KV cache.
+The chat history is **kept**: the next `llm_chat_respond()` replays it into whatever
+context you create next, which is how a context is resized mid-conversation.
+See [Lifecycle](#lifecycle-what-each-_free-releases).
 
 **Example:**
 
@@ -305,6 +376,9 @@ SELECT llm_sampler_create();
 
 **Description:**
 Frees resources associated with the current sampler.
+Note that `llm_model_load()`, `llm_model_free()` and `llm_sampler_create()` already
+release the previous sampler, so calling this is only necessary to drop a chain
+without replacing it.
 
 **Example:**
 
@@ -604,12 +678,21 @@ SELECT llm_token_count('Hello world!');
 **Description:**
 Generates a text embedding as a BLOB vector, with optional configuration provided as a comma-separated list of key=value pairs.
 By default, the embedding is normalized unless `normalize_embedding=0` is specified.
-If `json_output=1` is set, the function returns a JSON object instead of a BLOB.
+If `json_output=1` is set, the function returns the vector as a JSON **array** of
+numbers instead of a BLOB.
+
+Leave `json_output` off when storing embeddings for
+[sqlite-vector](https://github.com/sqliteai/sqlite-vector): the BLOB is already
+layout-compatible, so insert it directly rather than wrapping it.
 
 **Example:**
 
 ```sql
+SELECT llm_embed_generate('hello world');
+-- BLOB, ready to store in a sqlite-vector column
+
 SELECT llm_embed_generate('hello world', 'json_output=1');
+-- '[-0.0355376,0.0334288,...]'
 ```
 
 ---
@@ -661,9 +744,11 @@ SELECT reply FROM llm_chat('Tell me a joke.');
 **Returns:** `TEXT`
 
 **Description:**
-Starts a new in-memory chat session.
+Starts a new in-memory chat session, discarding any chat already in progress and
+clearing it out of the KV cache.
 Returns unique chat UUIDv7 value.
-If no chat is explicitly created, one will be created automatically when needed.
+If no chat is explicitly created, one will be created automatically when needed —
+but the UUID is needed for `llm_chat_save()` / `llm_chat_restore()`.
 
 **Example:**
 
@@ -678,7 +763,12 @@ SELECT llm_chat_create();
 **Returns:** `NULL`
 
 **Description:**
-Ends the current chat session.
+Ends the current chat session: discards the in-memory history and clears the
+conversation out of the KV cache. Anything already written by `llm_chat_save()`
+survives in `ai_chat_history` / `ai_chat_messages` and can be brought back with
+`llm_chat_restore()`.
+Use this before `llm_model_load()` when you want the new model to start clean.
+See [Lifecycle](#lifecycle-what-each-_free-releases).
 
 **Example:**
 
@@ -705,10 +795,15 @@ SELECT llm_chat_save('Support Chat', '{"user": "Marco"}');
 
 ## `llm_chat_restore(uuid TEXT)`
 
-**Returns:** `NULL`
+**Returns:** `INTEGER`
 
 **Description:**
-Restores a previously saved chat session by UUID.
+Restores a previously saved chat session by UUID, replacing whatever chat is current.
+Returns the number of messages restored.
+The KV cache is cleared, so the restored transcript is replayed on the next
+`llm_chat_respond()`. Combined with a `DELETE` against `ai_chat_messages`, this is how
+a long conversation is compacted — see
+[Recovering from a full context](#recovering-from-a-full-context).
 
 **Example:**
 
