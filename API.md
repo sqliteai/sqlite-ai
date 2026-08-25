@@ -170,7 +170,7 @@ The following keys are available in context_settings:
 | `json_output`           | `1 or 0`                                   | Force JSON output in embedding generation (default to 0). |
 | `max_tokens`            | `number`                                   | Set a maximum number of tokens in input. If input is too large then an error is returned. |
 | `n_predict`             | `number`                                   | Control the maximum number of tokens generated during text generation.                    |
-| `embedding_type`        | `FLOAT32, FLOAT16, BFLOAT16, UINT8, INT8`  | Set the model native type, mandatory during embedding generation.                   |
+| `embedding_type`        | `FLOAT32, FLOAT16, FLOATB16, UINT8, INT8`  | Set the model native type. **Required** for embedding contexts — omitting it, or passing an unrecognised name, fails with *"Embedding type (embedding_type) must be specified in the create context function"*. Note the spelling `FLOATB16`, not `BFLOAT16`. |
 
 ### Core sizing & threading
 
@@ -678,12 +678,21 @@ SELECT llm_token_count('Hello world!');
 **Description:**
 Generates a text embedding as a BLOB vector, with optional configuration provided as a comma-separated list of key=value pairs.
 By default, the embedding is normalized unless `normalize_embedding=0` is specified.
-If `json_output=1` is set, the function returns a JSON object instead of a BLOB.
+If `json_output=1` is set, the function returns the vector as a JSON **array** of
+numbers instead of a BLOB.
+
+Leave `json_output` off when storing embeddings for
+[sqlite-vector](https://github.com/sqliteai/sqlite-vector): the BLOB is already
+layout-compatible, so insert it directly rather than wrapping it.
 
 **Example:**
 
 ```sql
+SELECT llm_embed_generate('hello world');
+-- BLOB, ready to store in a sqlite-vector column
+
 SELECT llm_embed_generate('hello world', 'json_output=1');
+-- '[-0.0355376,0.0334288,...]'
 ```
 
 ---

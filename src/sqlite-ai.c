@@ -2806,7 +2806,7 @@ static bool llm_context_create_with_options (sqlite3_context *context, ai_contex
     
     // sanity check embedding_type
     if (ctx_params.embeddings && ai->options.embedding.type == 0) {
-        sqlite_context_result_error(context, SQLITE_ERROR, "Embedding type (embedding_type) must be specified in the create context funtion");
+        sqlite_context_result_error(context, SQLITE_ERROR, "Embedding type (embedding_type) must be specified in the create context function");
         return false;
     }
 
