@@ -525,6 +525,27 @@ fail:
     return 1;
 }
 
+static int test_context_kind_mismatch(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_embedding('embedding_type=UINT8');") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT llm_text_generate('Say hi');", "requires a text generation context") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_textgen();") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT llm_embed_generate('Say hi');", "requires an embedding context") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("context_kind_mismatch", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
 static int test_llm_embed_generate_basic(const test_env *env) {
     sqlite3 *db = NULL;
     sqlite3_stmt *stmt = NULL;
@@ -2585,6 +2606,7 @@ static const test_case TESTS[] = {
     {"llm_chat_respond_repeated", test_llm_chat_respond_repeated},
     {"llm_chat_vtab", test_llm_chat_vtab},
     {"test_llm_embed_generate", test_llm_embed_generate},
+    {"context_kind_mismatch", test_context_kind_mismatch},
     {"llm_embed_generate_basic", test_llm_embed_generate_basic},
     {"llm_embedding_then_chat", test_llm_embedding_then_chat},
     {"llm_context_size_errors", test_llm_context_size_errors},

@@ -140,6 +140,13 @@ typedef struct {
     } embedding;
 } llm_options;
 
+typedef enum {
+    LLM_CONTEXT_NONE = 0,
+    LLM_CONTEXT_TEXTGEN,
+    LLM_CONTEXT_EMBEDDING,
+    LLM_CONTEXT_CHAT
+} llm_context_kind;
+
 typedef struct {
     llama_chat_message *items;
     size_t count;
@@ -156,6 +163,7 @@ typedef struct {
     struct llama_model          *model;
     struct llama_context        *ctx;
     struct llama_sampler        *sampler;
+    llm_context_kind             context_kind;
     struct llama_adapter_lora   *lora[MAX_LORAS];
     float                       lora_scale[MAX_LORAS];
     
@@ -946,6 +954,20 @@ static bool llm_check_context (sqlite3_context *context) {
     return true;
 }
 
+static bool llm_check_context_kind (sqlite3_context *context, llm_context_kind expected,
+                                    const char *function_name, const char *expected_name) {
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    if (ai->context_kind == expected) return true;
+
+    const char *actual_name = "unknown";
+    if (ai->context_kind == LLM_CONTEXT_EMBEDDING) actual_name = "embeddings";
+    else if (ai->context_kind == LLM_CONTEXT_TEXTGEN) actual_name = "text generation";
+    else if (ai->context_kind == LLM_CONTEXT_CHAT) actual_name = "chat";
+    return sqlite_context_result_error(context, SQLITE_MISUSE,
+        "%s requires a %s context, but the current context was created for %s",
+        function_name, expected_name, actual_name);
+}
+
 // MARK: - Chat Messages -
 
 bool llm_messages_append (ai_messages *list, const char *role, const char *content) {
@@ -1017,6 +1039,7 @@ void llm_messages_free (ai_messages *list) {
 static void ai_context_release (ai_context *ai) {
     if (ai->ctx) llama_free(ai->ctx);
     ai->ctx = NULL;
+    ai->context_kind = LLM_CONTEXT_NONE;
 
     ai->chat.prev_len = 0;
     ai->chat.token_count = 0;
@@ -1526,6 +1549,7 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
 
 static void llm_embed_generate (sqlite3_context *context, int argc, sqlite3_value **argv) {
     if (llm_check_context(context) == false) return;
+    if (llm_check_context_kind(context, LLM_CONTEXT_EMBEDDING, "llm_embed_generate", "embedding") == false) return;
     if (llm_common_args_check(context, "llm_embed_generate", argc, argv, true) == false) return;
     
     const char *text = (const char *)sqlite3_value_text(argv[0]);
@@ -1758,6 +1782,7 @@ error:
 
 static void llm_text_generate (sqlite3_context *context, int argc, sqlite3_value **argv) {
     if (llm_check_context(context) == false) return;
+    if (llm_check_context_kind(context, LLM_CONTEXT_TEXTGEN, "llm_text_generate", "text generation") == false) return;
 
     if (argc < 1 || sqlite3_value_type(argv[0]) != SQLITE_TEXT) {
         sqlite_context_result_error(context, SQLITE_ERROR, "llm_text_generate requires at least one TEXT argument (prompt)");
@@ -2782,7 +2807,7 @@ static void llm_context_free (sqlite3_context *context, int argc, sqlite3_value 
     ai_context_release((ai_context *)sqlite3_user_data(context));
 }
 
-static bool llm_context_create_with_options (sqlite3_context *context, ai_context *ai, const char *options1, const char *options2) {
+static bool llm_context_create_with_options (sqlite3_context *context, ai_context *ai, const char *options1, const char *options2, llm_context_kind kind) {
     struct llama_context_params ctx_params = llama_context_default_params();
 
     // n_ctx = 0 tells llama.cpp to use the model's training window. Start from it so
@@ -2832,6 +2857,7 @@ static bool llm_context_create_with_options (sqlite3_context *context, ai_contex
     
     if (ai->ctx) llm_context_free(context, 0, NULL);
     ai->ctx = ctx;
+    ai->context_kind = kind;
     
     return true;
 }
@@ -2846,28 +2872,28 @@ static void llm_context_create (sqlite3_context *context, int argc, sqlite3_valu
     }
         
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    llm_context_create_with_options(context, ai, options, NULL);
+    llm_context_create_with_options(context, ai, options, NULL, LLM_CONTEXT_TEXTGEN);
 }
 
 static void llm_context_create_embedding (sqlite3_context *context, int argc, sqlite3_value **argv) {
     const char *options = AI_DEFAULT_CONTEXT_EMBEDDING_OPTIONS;
     const char *options2 = (argc > 0) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    llm_context_create_with_options(context, ai, options, options2);
+    llm_context_create_with_options(context, ai, options, options2, LLM_CONTEXT_EMBEDDING);
 }
 
 static void llm_context_create_chat (sqlite3_context *context, int argc, sqlite3_value **argv) {
     const char *options = AI_DEFAULT_CONTEXT_CHAT_OPTIONS;
     const char *options2 = (argc > 0) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    llm_context_create_with_options(context, ai, options, options2);
+    llm_context_create_with_options(context, ai, options, options2, LLM_CONTEXT_CHAT);
 }
 
 static void llm_context_create_textgen (sqlite3_context *context, int argc, sqlite3_value **argv) {
     const char *options = AI_DEFAULT_CONTEXT_TEXTGEN_OPTIONS;
     const char *options2 = (argc > 0) ? (const char *)sqlite3_value_text(argv[0]) : NULL;
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
-    llm_context_create_with_options(context, ai, options, options2);
+    llm_context_create_with_options(context, ai, options, options2, LLM_CONTEXT_TEXTGEN);
 }
 
 static void llm_context_size (sqlite3_context *context, int argc, sqlite3_value **argv) {
