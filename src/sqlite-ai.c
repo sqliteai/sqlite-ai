@@ -2139,7 +2139,12 @@ static int llm_chat_cursor_open (sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCu
     c->ai = vtab->ai;
     
     ai_context *ai = c->ai;
-    if (llm_chat_check_context(ai) == false) return SQLITE_ERROR;
+    // sqlite never calls xClose for a cursor whose xOpen failed, so the cursor has to be
+    // released here or it leaks for the lifetime of the connection
+    if (llm_chat_check_context(ai) == false) {
+        sqlite3_free(c);
+        return SQLITE_ERROR;
+    }
     
     *ppCursor = (sqlite3_vtab_cursor *)c;
     return SQLITE_OK;
