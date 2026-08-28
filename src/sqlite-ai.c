@@ -946,6 +946,28 @@ static bool llm_check_context (sqlite3_context *context) {
     return true;
 }
 
+// ai->context / ai->vtab are the error sink for the whole chat and sampler subsystem:
+// roughly twenty sites report through sqlite_common_set_error(ai->context, ai->vtab, ...),
+// including llm_chat_run(), llm_chat_generate_response(), llm_chat_tokenize_input(),
+// llm_chat_save_response(), llm_chat_check_context() and llm_sampler_check(). None of
+// them receives the caller directly, so both fields must name something that is alive
+// *right now* - a stale sqlite3_context belongs to a finalized statement, and reporting
+// into it calls sqlite3_result_error() on freed memory.
+//
+// The rule: every entry point publishes its own sink before running anything that can
+// fail. Scalars own a sqlite3_context; vtab methods own the sqlite3_vtab.
+static inline void llm_error_sink_scalar (ai_context *ai, sqlite3_context *context) {
+    if (!ai) return;
+    ai->context = context;
+    ai->vtab = NULL;
+}
+
+static inline void llm_error_sink_vtab (ai_context *ai, sqlite3_vtab *vtab) {
+    if (!ai) return;
+    ai->context = NULL;
+    ai->vtab = vtab;
+}
+
 // MARK: - Chat Messages -
 
 bool llm_messages_append (ai_messages *list, const char *role, const char *content) {
@@ -2098,8 +2120,7 @@ static int llm_chat_connect (sqlite3 *db, void *pAux, int argc, const char *cons
     
     vtab->ai = ai;
     ai->db = db;
-    ai->context = NULL;
-    ai->vtab = (sqlite3_vtab *)vtab;
+    llm_error_sink_vtab(ai, (sqlite3_vtab *)vtab);
     
     *ppVtab = (sqlite3_vtab *)vtab;
     return SQLITE_OK;
@@ -2107,6 +2128,12 @@ static int llm_chat_connect (sqlite3 *db, void *pAux, int argc, const char *cons
 
 static int llm_chat_disconnect (sqlite3_vtab *pVtab) {
     ai_vtab *vtab = (ai_vtab *)pVtab;
+
+    // the ai_context outlives the vtab: leaving ai->vtab pointing at freed memory turns
+    // the next sqlite_common_set_error() that routes through it into a use-after-free.
+    ai_context *ai = vtab->ai;
+    if (ai && ai->vtab == pVtab) ai->vtab = NULL;
+
     sqlite3_free(vtab);
     return SQLITE_OK;
 }
@@ -2139,6 +2166,8 @@ static int llm_chat_cursor_open (sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCu
     c->ai = vtab->ai;
     
     ai_context *ai = c->ai;
+    llm_error_sink_vtab(ai, (sqlite3_vtab *)vtab);
+
     // sqlite never calls xClose for a cursor whose xOpen failed, so the cursor has to be
     // released here or it leaks for the lifetime of the connection
     if (llm_chat_check_context(ai) == false) {
@@ -2153,6 +2182,7 @@ static int llm_chat_cursor_open (sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCu
 static int llm_chat_cursor_close (sqlite3_vtab_cursor *cur) {
     ai_cursor *c = (ai_cursor *)cur;
     ai_context *ai = c->ai;
+    llm_error_sink_vtab(ai, (sqlite3_vtab *)c->vtab);
 
     // save response before freeing the cursor
     ai_messages *messages = &ai->chat.messages;
@@ -2166,6 +2196,7 @@ static int llm_chat_cursor_close (sqlite3_vtab_cursor *cur) {
 
 static int llm_chat_cursor_next (sqlite3_vtab_cursor *cur) {
     ai_cursor *c = (ai_cursor *)cur;
+    llm_error_sink_vtab(c->ai, (sqlite3_vtab *)c->vtab);
     if (!llm_chat_generate_response (c->ai, c, NULL)) return SQLITE_ERROR;
     c->rowid++;
     return SQLITE_OK;
@@ -2194,6 +2225,7 @@ static int llm_chat_cursor_filter (sqlite3_vtab_cursor *cur, int idxNum, const c
     ai_cursor *c = (ai_cursor *)cur;
     ai_context *ai = c->ai;
     ai_vtab *vtab = c->vtab;
+    llm_error_sink_vtab(ai, (sqlite3_vtab *)vtab);
     
     // sanity check arguments
     if (argc != 1) {
@@ -2242,6 +2274,7 @@ static sqlite3_module llm_chat = {
 // MARK: -
 
 static void llm_chat_free (sqlite3_context *context, int argc, sqlite3_value **argv) {
+    llm_error_sink_scalar((ai_context *)sqlite3_user_data(context), context);
     ai_chat_release((ai_context *)sqlite3_user_data(context));
 }
 
@@ -2249,6 +2282,7 @@ static void llm_chat_create (sqlite3_context *context, int argc, sqlite3_value *
     if (llm_check_context(context) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     
     // clean-up old chat (if any)
     llm_chat_free(context, argc, argv);
@@ -2274,6 +2308,7 @@ static bool llm_chat_check_tables (sqlite3_context *context) {
 
 static void llm_chat_save (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     if (llm_chat_check_tables(context) == false) return;
     
     // sanity check if there is something to save
@@ -2355,10 +2390,11 @@ static void llm_chat_restore (sqlite3_context *context, int argc, sqlite3_value 
     int types[] = {SQLITE_TEXT};
     if (sqlite_sanity_function(context, "llm_chat_restore", argc, argv, 1, types, false, false) == false) return;
 
+    ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
+
     // free old chat (if any)
     llm_chat_free(context, 0, NULL);
-
-    ai_context *ai = (ai_context *)sqlite3_user_data(context);
 
     // re-initialize chat state (UUID, buffers, tokens)
     if (llm_chat_check_context(ai) == false) return;
@@ -2411,6 +2447,7 @@ static void llm_chat_respond (sqlite3_context *context, int argc, sqlite3_value 
     }
 
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     if (!ai->model) {
         sqlite_context_result_error(context, SQLITE_ERROR, "No model loaded");
         return;
@@ -2418,8 +2455,6 @@ static void llm_chat_respond (sqlite3_context *context, int argc, sqlite3_value 
     if (llm_chat_check_context(ai) == false) return;
 
     const char *user_prompt = (const char *)sqlite3_value_text(argv[0]);
-    ai->context = context;
-    ai->vtab = NULL;
 
     ai->chat.token_count = 0;
     buffer_reset(&ai->chat.response);
@@ -2449,6 +2484,7 @@ static void llm_chat_system_prompt(sqlite3_context *context, int argc, sqlite3_v
         return;
 
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     if (llm_chat_check_context(ai) == false)
         return;
 
@@ -2494,6 +2530,7 @@ static void llm_chat_system_prompt(sqlite3_context *context, int argc, sqlite3_v
 
 static void llm_sampler_init_greedy (sqlite3_context *context, int argc, sqlite3_value **argv) {
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) llama_sampler_chain_add(ai->sampler, llama_sampler_init_greedy());
 }
@@ -2505,6 +2542,7 @@ static void llm_sampler_init_dist (sqlite3_context *context, int argc, sqlite3_v
     }
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         int32_t seed = (argc == 1) ? (int32_t)sqlite3_value_int64(argv[0]) : (int32_t)LLAMA_DEFAULT_SEED;
@@ -2519,6 +2557,7 @@ static void llm_sampler_init_top_k (sqlite3_context *context, int argc, sqlite3_
     if (sqlite_sanity_function(context, "llm_sampler_init_top_k", argc, argv, 1, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         int32_t k = (int32_t)sqlite3_value_int64(argv[0]);
@@ -2533,6 +2572,7 @@ static void llm_sampler_init_top_p (sqlite3_context *context, int argc, sqlite3_
     if (sqlite_sanity_function(context, "llm_sampler_init_top_p", argc, argv, 2, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
@@ -2548,6 +2588,7 @@ static void llm_sampler_init_min_p (sqlite3_context *context, int argc, sqlite3_
     if (sqlite_sanity_function(context, "llm_sampler_init_min_p", argc, argv, 2, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
@@ -2563,6 +2604,7 @@ static void llm_sampler_init_typical (sqlite3_context *context, int argc, sqlite
     if (sqlite_sanity_function(context, "llm_sampler_init_typical", argc, argv, 2, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
@@ -2576,6 +2618,7 @@ static void llm_sampler_init_temp (sqlite3_context *context, int argc, sqlite3_v
     if (sqlite_sanity_function(context, "llm_sampler_init_temp", argc, argv, 1, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         float t = (float)sqlite3_value_double(argv[0]);
@@ -2590,6 +2633,7 @@ static void llm_sampler_init_temp_ext (sqlite3_context *context, int argc, sqlit
     if (sqlite_sanity_function(context, "llm_sampler_init_temp_ext", argc, argv, 3, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         float t = (float)sqlite3_value_double(argv[0]);
@@ -2606,6 +2650,7 @@ static void llm_sampler_init_xtc (sqlite3_context *context, int argc, sqlite3_va
     if (sqlite_sanity_function(context, "llm_sampler_init_xtc", argc, argv, 4, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         float p = (float)sqlite3_value_double(argv[0]);
@@ -2623,6 +2668,7 @@ static void llm_sampler_init_top_n_sigma (sqlite3_context *context, int argc, sq
     if (sqlite_sanity_function(context, "llm_sampler_init_top_n_sigma", argc, argv, 1, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         float n = (float)sqlite3_value_double(argv[0]);
@@ -2643,6 +2689,7 @@ static void llm_sampler_init_mirostat (sqlite3_context *context, int argc, sqlit
         return;
     }
     
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         uint32_t seed = (uint32_t)sqlite3_value_int64(argv[0]);
@@ -2660,6 +2707,7 @@ static void llm_sampler_init_mirostat_v2 (sqlite3_context *context, int argc, sq
     if (sqlite_sanity_function(context, "llm_sampler_init_mirostat_v2", argc, argv, 3, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         uint32_t seed = (uint32_t)sqlite3_value_int64(argv[0]);
@@ -2680,6 +2728,7 @@ static void llm_sampler_init_grammar (sqlite3_context *context, int argc, sqlite
         return;
     }
     
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         const char *grammar_str = (const char *)sqlite3_value_text(argv[0]);
@@ -2696,6 +2745,7 @@ static void llm_sampler_init_infill (sqlite3_context *context, int argc, sqlite3
         return;
     }
     
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         llama_sampler_chain_add(ai->sampler, llama_sampler_init_infill(vocab));
@@ -2707,6 +2757,7 @@ static void llm_sampler_init_penalties (sqlite3_context *context, int argc, sqli
     if (sqlite_sanity_function(context, "llm_sampler_init_penalties", argc, argv, 4, types, true, false) == false) return;
     
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
     if (ai->sampler) {
         int32_t penalty_last_n = (int32_t)sqlite3_value_int64(argv[0]);
@@ -2780,6 +2831,7 @@ static void llm_sampler_create (sqlite3_context *context, int argc, sqlite3_valu
     ai_context *ai = (ai_context *)sqlite3_user_data(context);
     if (ai->sampler) llama_sampler_free(ai->sampler);
     ai->sampler = NULL;
+    llm_error_sink_scalar(ai, context);
     llm_sampler_check(ai);
 }
 
@@ -2831,7 +2883,9 @@ static bool llm_context_create_with_options (sqlite3_context *context, ai_contex
 
     struct llama_context *ctx = llama_init_from_model(ai->model, ctx_params);
     if (!ctx) {
-        sqlite_common_set_error(ai->context, ai->vtab, SQLITE_ERROR, "Unable to create context from model");
+        // report to the context we were handed, not ai->context/ai->vtab: those are
+        // leftovers from an earlier statement and may already be freed.
+        sqlite_context_result_error(context, SQLITE_ERROR, "Unable to create context from model");
         return false;
     }
     
