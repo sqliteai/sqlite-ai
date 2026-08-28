@@ -489,6 +489,45 @@ fail:
     return 1;
 }
 
+// ai->context / ai->vtab are the error sink for the whole chat subsystem, and every
+// entry point has to publish its own before running anything that can fail. When it was
+// left holding a finalized statement's sqlite3_context, llm_chat_restore() reported into
+// freed memory and took the process down with it.
+static int test_chat_error_sink_after_statement(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+
+    // (a) after a scalar chat call, whose sqlite3_context dies with its statement
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=512,n_predict=4');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_respond('hi');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT llm_chat_restore('deadbeef');", "No context found") != 0) goto fail;
+
+    // (b) after a vtab scan, which used to leave ai->vtab armed so the message went into
+    //     vtab->zErrMsg and was discarded
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=512,n_predict=4');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT count(*) FROM llm_chat('hi');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT llm_chat_restore('deadbeef');", "No context found") != 0) goto fail;
+
+    // (c) with no context ever created, the sink is still unset
+    if (exec_expect_error(env, db, "SELECT llm_chat_system_prompt('hi');", "No context found") != 0) goto fail;
+
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("chat_error_sink_after_statement", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
 static int test_llm_embed_generate(const test_env *env) {
     sqlite3 *db = NULL;
     if (open_db_and_load(env, &db) != SQLITE_OK) {
@@ -2584,6 +2623,7 @@ static const test_case TESTS[] = {
     {"issue15_llm_chat_without_context", test_issue15_chat_without_context},
     {"llm_chat_respond_repeated", test_llm_chat_respond_repeated},
     {"llm_chat_vtab", test_llm_chat_vtab},
+    {"chat_error_sink_after_statement", test_chat_error_sink_after_statement},
     {"test_llm_embed_generate", test_llm_embed_generate},
     {"llm_embed_generate_basic", test_llm_embed_generate_basic},
     {"llm_embedding_then_chat", test_llm_embedding_then_chat},
