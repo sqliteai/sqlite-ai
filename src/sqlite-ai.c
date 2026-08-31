@@ -140,6 +140,19 @@ typedef struct {
     } embedding;
 } llm_options;
 
+// What the active llama context was configured for. A context created with
+// generate_embedding=1 has embeddings enabled and pooling forced on, which makes it
+// unusable for token-by-token generation (no per-token logits are produced, so
+// sampling reads a NULL logits buffer). Contexts created for text generation and for
+// chat are byte-for-byte identical - llm_context_create_chat() and
+// llm_context_create_textgen() both pass the same empty option string - so they share
+// a single kind and stay mutually interchangeable.
+typedef enum {
+    LLM_CONTEXT_NONE = 0,
+    LLM_CONTEXT_GENERATIVE,
+    LLM_CONTEXT_EMBEDDING
+} llm_context_kind;
+
 typedef struct {
     llama_chat_message *items;
     size_t count;
@@ -156,6 +169,7 @@ typedef struct {
     struct llama_model          *model;
     struct llama_context        *ctx;
     struct llama_sampler        *sampler;
+    llm_context_kind             context_kind;          // what ctx was configured for (derived from the parsed options)
     struct llama_adapter_lora   *lora[MAX_LORAS];
     float                       lora_scale[MAX_LORAS];
     
@@ -500,11 +514,19 @@ static bool llm_context_options_callback (void *ctx, void *xdata, const char *ke
         // https://github.com/ggml-org/llama.cpp/discussions/15093
         int value = (int)strtol(buffer, NULL, 0);
         options->embeddings = (value != 0);
-        options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
-        
-        // for non-causal models, batch size must be equal to ubatch size
-        // when generating embeddings, always tie them together.
-        options->n_ubatch = options->n_batch;
+
+        // Only when actually enabling embeddings. API.md documents this key as "1 or 0",
+        // and generate_embedding=0 used to force MEAN pooling anyway - which both made
+        // "embeddings off" configure a pooling context, and, because an explicit
+        // pooling_type is what tells the classifier the caller asked for pooling, hid
+        // embedding models from the check in llm_context_create_with_options().
+        if (value != 0) {
+            options->pooling_type = LLAMA_POOLING_TYPE_MEAN;
+
+            // for non-causal models, batch size must be equal to ubatch size
+            // when generating embeddings, always tie them together.
+            options->n_ubatch = options->n_batch;
+        }
         return true;
     }
     
@@ -946,6 +968,36 @@ static bool llm_check_context (sqlite3_context *context) {
     return true;
 }
 
+static const char *llm_context_kind_name (llm_context_kind kind) {
+    switch (kind) {
+        case LLM_CONTEXT_EMBEDDING:  return "embedding generation";
+        case LLM_CONTEXT_GENERATIVE: return "text generation";
+        case LLM_CONTEXT_NONE:       break;
+    }
+    // callers gate on a live context first, so LLM_CONTEXT_NONE should be unreachable
+    return "an unknown operation";
+}
+
+// Rejects an operation that needs per-token logits when the active context cannot
+// produce them: generate_embedding=1 turns on pooled embeddings, and llama then returns
+// no per-token logits to sample from.
+//
+// The error sink is passed explicitly rather than read from ai->context/ai->vtab so
+// this check does not depend on those fields being current: scalar functions pass
+// (context, NULL), the llm_chat() vtab passes (NULL, vtab).
+static bool llm_check_generative (ai_context *ai, sqlite3_context *context, sqlite3_vtab *vtab, const char *function_name) {
+    if (!ai) return false;
+
+    if (ai->context_kind != LLM_CONTEXT_GENERATIVE) {
+        sqlite_common_set_error(context, vtab, SQLITE_MISUSE,
+            "%s requires a text generation context, but the current context was created for %s",
+            function_name, llm_context_kind_name(ai->context_kind));
+        return false;
+    }
+
+    return true;
+}
+
 // ai->context / ai->vtab are the error sink for the whole chat and sampler subsystem:
 // roughly twenty sites report through sqlite_common_set_error(ai->context, ai->vtab, ...),
 // including llm_chat_run(), llm_chat_generate_response(), llm_chat_tokenize_input(),
@@ -1039,6 +1091,7 @@ void llm_messages_free (ai_messages *list) {
 static void ai_context_release (ai_context *ai) {
     if (ai->ctx) llama_free(ai->ctx);
     ai->ctx = NULL;
+    ai->context_kind = LLM_CONTEXT_NONE;
 
     ai->chat.prev_len = 0;
     ai->chat.token_count = 0;
@@ -1549,7 +1602,14 @@ static void llm_embed_generate_run (sqlite3_context *context, const char *text, 
 static void llm_embed_generate (sqlite3_context *context, int argc, sqlite3_value **argv) {
     if (llm_check_context(context) == false) return;
     if (llm_common_args_check(context, "llm_embed_generate", argc, argv, true) == false) return;
-    
+
+    // Deliberately NOT gated on context_kind. What embedding generation actually needs is
+    // a context that pools, and llm_embed_generate_run() already checks the *resolved*
+    // pooling type (llama_pooling_type()) further down. That check is strictly better than
+    // one based on how the context was declared: embedding models inherit mean pooling
+    // from the GGUF, so llm_context_create('context_size=512,embedding_type=FLOAT32') on
+    // e.g. all-MiniLM-L6-v2 produces working embeddings without generate_embedding=1.
+
     const char *text = (const char *)sqlite3_value_text(argv[0]);
     int32_t text_len = (int32_t)sqlite3_value_bytes(argv[0]);
     const char *model_options = (argc == 2) ? (const char *)sqlite3_value_text(argv[1]) : NULL;
@@ -1791,6 +1851,7 @@ static void llm_text_generate (sqlite3_context *context, int argc, sqlite3_value
         sqlite_context_result_error(context, SQLITE_ERROR, "No model loaded");
         return;
     }
+    if (llm_check_generative(ai, context, NULL, "llm_text_generate") == false) return;
 
     const char *text = (const char *)sqlite3_value_text(argv[0]);
     int32_t text_len = (int32_t)sqlite3_value_bytes(argv[0]);
@@ -1838,7 +1899,14 @@ static bool llm_chat_check_context (ai_context *ai) {
         sqlite_common_set_error(ai ? ai->context : NULL, ai ? ai->vtab : NULL, SQLITE_MISUSE, "No context found. Please call llm_context_create() before llm_chat_create().");
         return false;
     }
-    
+
+    // NOTE: no context-kind check here. Only the entry points that actually decode and
+    // sample - llm_chat_respond() and the llm_chat() vtab - need per-token logits, and
+    // they carry the check themselves. llm_chat_create/restore/system_prompt only build
+    // up in-memory message state, and llm_chat_restore() in particular has already
+    // dropped the previous chat by the time it gets here, so failing it would destroy
+    // state on behalf of an operation that would have worked.
+
     // check sampler
     if (!ai->sampler) {
         llm_sampler_check(ai);
@@ -2168,13 +2236,19 @@ static int llm_chat_cursor_open (sqlite3_vtab *pVtab, sqlite3_vtab_cursor **ppCu
     ai_context *ai = c->ai;
     llm_error_sink_vtab(ai, (sqlite3_vtab *)vtab);
 
-    // sqlite never calls xClose for a cursor whose xOpen failed, so the cursor has to be
-    // released here or it leaks for the lifetime of the connection
+    // Only meaningful once a context exists: with ai->ctx == NULL the kind is
+    // LLM_CONTEXT_NONE and this would report "created for an unknown operation" where
+    // llm_chat_check_context() below gives the caller the actionable "No context found".
+    // sqlite never calls xClose for a cursor whose xOpen failed, so free it on the way out.
+    if (ai->ctx && llm_check_generative(ai, NULL, (sqlite3_vtab *)vtab, "llm_chat") == false) {
+        sqlite3_free(c);
+        return SQLITE_ERROR;
+    }
     if (llm_chat_check_context(ai) == false) {
         sqlite3_free(c);
         return SQLITE_ERROR;
     }
-    
+
     *ppCursor = (sqlite3_vtab_cursor *)c;
     return SQLITE_OK;
 }
@@ -2452,6 +2526,7 @@ static void llm_chat_respond (sqlite3_context *context, int argc, sqlite3_value 
         sqlite_context_result_error(context, SQLITE_ERROR, "No model loaded");
         return;
     }
+    if (llm_check_generative(ai, context, NULL, "llm_chat_respond") == false) return;
     if (llm_chat_check_context(ai) == false) return;
 
     const char *user_prompt = (const char *)sqlite3_value_text(argv[0]);
@@ -2861,6 +2936,13 @@ static bool llm_context_create_with_options (sqlite3_context *context, ai_contex
         }
     }
     
+    // Whether the caller asked for pooling at all. llama_context_default_params() leaves
+    // pooling_type UNSPECIFIED and the parser only writes it for an explicit
+    // pooling_type=... or generate_embedding=1, so anything else here came from the user.
+    // llama then resolves UNSPECIFIED from the model's own hparams, which is what lets us
+    // tell "this model pools by default" from "this caller asked for pooling".
+    const bool caller_set_pooling = (ctx_params.pooling_type != LLAMA_POOLING_TYPE_UNSPECIFIED);
+
     // sanity check embedding_type
     if (ctx_params.embeddings && ai->options.embedding.type == 0) {
         sqlite_context_result_error(context, SQLITE_ERROR, "Embedding type (embedding_type) must be specified in the create context function");
@@ -2891,7 +2973,23 @@ static bool llm_context_create_with_options (sqlite3_context *context, ai_contex
     
     if (ai->ctx) llm_context_free(context, 0, NULL);
     ai->ctx = ctx;
-    
+
+    // Classify from what was actually configured, not from which wrapper was called:
+    // llm_context_create('generate_embedding=1,...') is documented as equivalent to
+    // llm_context_create_embedding() and has to be recognised as one. ctx_params is
+    // rebuilt from llama_context_default_params() on every call, so it always describes
+    // this context.
+    //
+    // The second clause catches embedding *models*. A BERT-family model carries its own
+    // pooling type in the GGUF, so llm_context_create('context_size=512,...') on
+    // all-MiniLM yields a context that pools - and generation on it silently returns ''
+    // (GH #33) because the first sampled token reads as EOG. Resolved pooling alone is
+    // not enough to conclude that, though: a caller may force pooling_type=mean on a
+    // perfectly generative model, and that still generates. Only pooling the caller did
+    // not ask for tells us the model itself is an embedding model.
+    const bool model_pools_by_default = (!caller_set_pooling && llama_pooling_type(ctx) != LLAMA_POOLING_TYPE_NONE);
+    ai->context_kind = (ctx_params.embeddings || model_pools_by_default) ? LLM_CONTEXT_EMBEDDING : LLM_CONTEXT_GENERATIVE;
+
     return true;
 }
 

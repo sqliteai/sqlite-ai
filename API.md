@@ -158,6 +158,21 @@ Creates a new inference context with comma separated key=value configuration.
 
 **Context must explicitly created before performing any AI operation!**
 
+The context is classified from how it is actually configured, not from which constructor
+you call. It is an *embedding* context when either `generate_embedding=1` was passed — so
+`llm_context_create('generate_embedding=1,...')` behaves exactly like
+`llm_context_create_embedding()` — or the model pools by default, which is how
+BERT-family embedding models (`all-MiniLM`, `nomic-embed`) describe themselves in their
+GGUF. Anything else is a *text generation* context. Forcing `pooling_type` yourself opts out of that second
+test in both directions: on a generative model it does **not** make the context an
+embedding one, and on an embedding model it suppresses the detection, so
+`llm_text_generate()` is allowed again and returns an empty string. Only pooling you did
+not ask for identifies the model as an embedding one — if you want the check, leave
+`pooling_type` unset, or use `llm_context_create_embedding()`. Text generation and chat reject an
+embedding context with `SQLITE_MISUSE`, since it produces no per-token logits to sample
+from. Embedding generation is not restricted this way — it needs pooling rather than a
+particular constructor, and checks for that directly.
+
 ## context_settings
 The following keys are available in context_settings:
 
@@ -165,7 +180,7 @@ The following keys are available in context_settings:
 
 | Key                     | Type     | Meaning                                                          |
 | ------------------------| -------- | ---------------------------------------------------------------- |
-| `generate_embedding`    | `1 or 0`                                   | Force the model to generate embeddings.            |
+| `generate_embedding`    | `1 or 0`                                   | Force the model to generate embeddings. This is what marks the context as an *embedding* context, which makes `llm_text_generate()`, `llm_chat_respond()` and the `llm_chat()` vtab reject it. Also forces `pooling_type` to `mean`, and `n_ubatch` is clamped to `n_batch` for embedding contexts. |
 | `normalize_embedding`   | `1 or 0`                                   | Force normalization during embedding generation (default to 1).  |
 | `json_output`           | `1 or 0`                                   | Force JSON output in embedding generation (default to 0). |
 | `max_tokens`            | `number`                                   | Set a maximum number of tokens in input. If input is too large then an error is returned. |
@@ -218,7 +233,6 @@ The following keys are available in context_settings:
 
 | Key            | Type    | Meaning                                                                                                                                    |
 | -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `embeddings`   | `1 or 0`  | If `1`, extract embeddings (with logits). Used by the embedding preset.                                                                 |
 | `offload_kqv`  | `1 or 0`  | Offload KQV ops (incl. KV cache) to GPU.                                                                                                   |
 | `no_perf`      | `1 or 0`  | Disable performance timing.                                                                                                                |
 | `op_offload`   | `1 or 0`  | Offload host tensor ops to device.                                                                                                         |
@@ -685,6 +699,12 @@ Leave `json_output` off when storing embeddings for
 [sqlite-vector](https://github.com/sqliteai/sqlite-vector): the BLOB is already
 layout-compatible, so insert it directly rather than wrapping it.
 
+Requires a context that pools token embeddings. `llm_context_create_embedding()`
+guarantees that; a context built another way also works whenever pooling resolves to
+something other than `none` — embedding models (BERT-family, such as `all-MiniLM` or
+`nomic-embed-text`) inherit mean pooling from the GGUF, so they need no extra settings. A
+context with no pooling fails with *"Embedding generation requires pooling"*.
+
 **Example:**
 
 ```sql
@@ -705,6 +725,13 @@ SELECT llm_embed_generate('hello world', 'json_output=1');
 Generates a full-text completion based on input, with optional configuration provided as a comma-separated list of key=value pairs.
 
 When a vision model is loaded via `llm_vision_load()`, you can pass one or more images as additional arguments. Images can be file paths (TEXT) or raw image data (BLOB). Supported image formats: JPG, PNG, BMP, GIF.
+
+Requires a text generation context. Contexts from `llm_context_create_textgen()`,
+`llm_context_create_chat()` and a plain `llm_context_create()` are all accepted — they are
+configured identically. Calling this against an embedding context fails with
+`SQLITE_MISUSE` rather than returning an empty string, which also covers embedding
+*models*: on a BERT-family model every context is an embedding context, so generation is
+rejected there no matter which constructor was used.
 
 **Examples:**
 
@@ -749,6 +776,12 @@ clearing it out of the KV cache.
 Returns unique chat UUIDv7 value.
 If no chat is explicitly created, one will be created automatically when needed —
 but the UUID is needed for `llm_chat_save()` / `llm_chat_restore()`.
+
+`llm_chat_respond()` and the `llm_chat()` virtual table require a text generation
+context, because they decode and sample; running either against an embedding context
+(`generate_embedding=1`) fails with `SQLITE_MISUSE`. `llm_chat_create()`,
+`llm_chat_restore()` and `llm_chat_system_prompt()` only build up in-memory message state,
+so they work regardless of the active context.
 
 **Example:**
 

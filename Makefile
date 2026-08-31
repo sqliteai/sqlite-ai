@@ -45,6 +45,13 @@ GGUF_MODEL_NAME ?= gemma-3-270m-it-UD-IQ2_M.gguf
 GGUF_MODEL_URL ?= https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-UD-IQ2_M.gguf
 GGUF_MODEL_PATH := $(GGUF_MODEL_DIR)/$(GGUF_MODEL_NAME)
 
+# an embedding model (BERT-family) is needed to cover the context-kind checks: it pools
+# by default from its own GGUF, which a generative model never does
+EMBED_MODEL_DIR ?= tests/models/Mungert/all-MiniLM-L6-v2-GGUF
+EMBED_MODEL_NAME ?= all-MiniLM-L6-v2-q8_0.gguf
+EMBED_MODEL_URL ?= https://huggingface.co/Mungert/all-MiniLM-L6-v2-GGUF/resolve/main/all-MiniLM-L6-v2-q8_0.gguf
+EMBED_MODEL_PATH := $(EMBED_MODEL_DIR)/$(EMBED_MODEL_NAME)
+
 WHISPER_MODEL_DIR ?= tests/models/ggerganov/whisper-tiny
 WHISPER_MODEL_NAME ?= ggml-tiny.bin
 WHISPER_MODEL_URL ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
@@ -245,6 +252,10 @@ $(GGUF_MODEL_PATH):
 	@mkdir -p $(GGUF_MODEL_DIR)
 	curl -L --fail --retry 3 -o $@ $(GGUF_MODEL_URL)
 
+$(EMBED_MODEL_PATH):
+	@mkdir -p $(EMBED_MODEL_DIR)
+	curl -L --fail --retry 3 -o $@ $(EMBED_MODEL_URL)
+
 $(WHISPER_MODEL_PATH):
 	@mkdir -p $(WHISPER_MODEL_DIR)
 	curl -L --fail --retry 3 -o $@ $(WHISPER_MODEL_URL)
@@ -255,14 +266,14 @@ $(AUDIO_TEST_WAV):
 
 TEST_DEPS := $(TARGET)
 ifeq ($(SKIP_UNITTEST),0)
-TEST_DEPS += $(CTEST_BIN) $(GGUF_MODEL_PATH) $(WHISPER_MODEL_PATH) $(AUDIO_TEST_WAV)
+TEST_DEPS += $(CTEST_BIN) $(GGUF_MODEL_PATH) $(EMBED_MODEL_PATH) $(WHISPER_MODEL_PATH) $(AUDIO_TEST_WAV)
 endif
 
 test: $(TEST_DEPS)
 		@echo "Running sqlite3 CLI smoke test (ensures .load works)..."
 		$(SQLITE3) ":memory:" -cmd ".bail on" ".load ./dist/ai" "SELECT ai_version();"
 ifeq ($(SKIP_UNITTEST),0)
-		$(CTEST_BIN) --extension "$(TARGET)" --model "$(GGUF_MODEL_PATH)" --whisper-model "$(WHISPER_MODEL_PATH)" --audio "$(AUDIO_TEST_WAV)"
+		$(CTEST_BIN) --extension "$(TARGET)" --model "$(GGUF_MODEL_PATH)" --embed-model "$(EMBED_MODEL_PATH)" --whisper-model "$(WHISPER_MODEL_PATH)" --audio "$(AUDIO_TEST_WAV)"
 else
 		@echo "Skipping C unit tests (SKIP_UNITTEST=$(SKIP_UNITTEST))."
 endif
