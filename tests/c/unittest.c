@@ -15,6 +15,7 @@
 typedef struct {
     const char *extension_path;
     const char *model_path;
+    const char *embed_model_path;
     const char *whisper_model_path;
     const char *audio_path;
     bool verbose;
@@ -28,7 +29,7 @@ typedef struct {
 } test_case;
 
 static void usage(const char *prog) {
-    fprintf(stderr, "Usage: %s [--extension /path/to/ai] [--model /path/to/model] [--whisper-model /path/to/whisper] [--audio /path/to/audio.wav] [--verbose]\n", prog);
+    fprintf(stderr, "Usage: %s [--extension /path/to/ai] [--model /path/to/model] [--embed-model /path/to/embedding-model] [--whisper-model /path/to/whisper] [--audio /path/to/audio.wav] [--verbose]\n", prog);
 }
 
 static int expect_error_contains(const char *err_msg, const char *needle) {
@@ -558,6 +559,195 @@ static int test_llm_embed_generate(const test_env *env) {
     sqlite3_close_v2(db);
     
     return assert_sqlite_memory_clean("llm_embed_generate", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
+// Regression (GH #33): an embedding context produces no per-token logits, so text
+// generation on one used to sample from a NULL logits buffer and silently return ''.
+// The entry points that decode and sample must reject it with an explicit error instead -
+// including the chat paths, where reading that NULL buffer is a crash, not an empty
+// string. The llm_chat() vtab row also covers the cursor it has to free on rejection:
+// sqlite never calls xClose for a cursor whose xOpen failed, so a leak there would show
+// up in the memory check below.
+static int test_context_kind_mismatch(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+
+    // an embedding context rejects every operation that decodes and samples
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_embedding('context_size=512,embedding_type=UINT8');") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT llm_text_generate('Say hi');",
+                          "llm_text_generate requires a text generation context") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT llm_chat_respond('Say hi');",
+                          "llm_chat_respond requires a text generation context") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT reply FROM llm_chat('Say hi');",
+                          "llm_chat requires a text generation context") != 0) goto fail;
+    // repeat the vtab rejection: a cursor leaked per attempt would fail the memory check
+    if (exec_expect_error(env, db, "SELECT reply FROM llm_chat('Say hi again');",
+                          "llm_chat requires a text generation context") != 0) goto fail;
+
+    // the same rejection must apply to an embedding context built through the generic
+    // constructor, which API.md documents as equivalent to llm_context_create_embedding()
+    if (exec_expect_ok(env, db, "SELECT llm_context_create('generate_embedding=1,normalize_embedding=1,pooling_type=mean,context_size=512,embedding_type=UINT8');") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT llm_text_generate('Say hi');",
+                          "llm_text_generate requires a text generation context") != 0) goto fail;
+
+    // the mirror direction is NOT gated on how the context was declared: what embeddings
+    // need is pooling, so this is rejected by the resolved-pooling check instead
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_textgen('context_size=512');") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT llm_embed_generate('Say hi');",
+                          "Embedding generation requires pooling") != 0) goto fail;
+
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("context_kind_mismatch", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
+// An embedding *model* (BERT-family) carries its own pooling type in the GGUF, so a
+// context built with no embedding settings at all still pools - and generation on it
+// returns '' with no error, which is the GH #33 symptom on the model rather than the
+// context. Requires an encoder-style model, so it is skipped without --embed-model.
+static int test_context_kind_embedding_model(const test_env *env) {
+    if (!env->embed_model_path) {
+        printf("  [SKIP] no --embed-model provided\n");
+        return 0;
+    }
+
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", env->embed_model_path);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+
+    // the exact flow API.md recommends: a plain context, no generate_embedding.
+    // Embeddings must keep working...
+    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=512,embedding_type=FLOAT32');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_embed_generate('hello world');") != 0) goto fail;
+    // ...and generation on it must say so rather than return ''
+    if (exec_expect_error(env, db, "SELECT llm_text_generate('Say hi');",
+                          "llm_text_generate requires a text generation context") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT llm_chat_respond('Say hi');",
+                          "llm_chat_respond requires a text generation context") != 0) goto fail;
+
+    // asking for a textgen context on this model does not make it generative either
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_textgen('context_size=512');") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT llm_text_generate('Say hi');",
+                          "llm_text_generate requires a text generation context") != 0) goto fail;
+
+    // nor does explicitly turning embeddings off: generate_embedding=0 must not be read
+    // as "the caller asked for pooling", which would hide the model from the check
+    if (exec_expect_ok(env, db, "SELECT llm_context_create('generate_embedding=0,context_size=512,embedding_type=FLOAT32');") != 0) goto fail;
+    if (exec_expect_error(env, db, "SELECT llm_text_generate('Say hi');",
+                          "llm_text_generate requires a text generation context") != 0) goto fail;
+
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("context_kind_embedding_model", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
+// With no context at all the vtab must give the actionable "No context found", not the
+// context-kind message: LLM_CONTEXT_NONE is not a kind the caller can act on.
+static int test_chat_vtab_without_context(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+
+    if (exec_expect_error(env, db, "SELECT reply FROM llm_chat('hi');", "No context found") != 0) goto fail;
+    // twice: a cursor leaked per rejected xOpen would fail the memory check below
+    if (exec_expect_error(env, db, "SELECT reply FROM llm_chat('hi again');", "No context found") != 0) goto fail;
+
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("chat_vtab_without_context", env);
+
+fail:
+    if (db) sqlite3_close_v2(db);
+    return 1;
+}
+
+// The other half of the contract: the kind must come from the options that were actually
+// parsed, not from which llm_context_create_* wrapper was called. A generic
+// llm_context_create('generate_embedding=1,...') is an embedding context and must keep
+// working with llm_embed_generate(), and chat/textgen contexts are byte-for-byte
+// identical so llm_text_generate() has to accept either (see the README vision example,
+// which calls llm_context_create_chat() and then llm_text_generate()).
+static int test_context_kind_compatible(const test_env *env) {
+    sqlite3 *db = NULL;
+    if (open_db_and_load(env, &db) != SQLITE_OK) return 1;
+
+    const char *model = env->model_path ? env->model_path : DEFAULT_MODEL_PATH;
+    char sqlbuf[512];
+    char result[4096];
+    snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
+    if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
+
+    // embedding context built the generic way still generates embeddings
+    if (exec_expect_ok(env, db, "SELECT llm_context_create('generate_embedding=1,normalize_embedding=1,pooling_type=mean,context_size=512,embedding_type=UINT8');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_embed_generate('generic embedding context');") != 0) goto fail;
+
+    // ...and so does a context that never passed generate_embedding but still resolves to
+    // a pooling type. Embedding models (BERT-family) inherit mean pooling from the GGUF,
+    // so gating llm_embed_generate() on how the context was declared would break them;
+    // here pooling_type is set explicitly to get the same shape from the test model.
+    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=512,pooling_type=mean,embedding_type=UINT8');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_embed_generate('pooling without generate_embedding');") != 0) goto fail;
+
+    // a chat context is a valid text generation context
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_chat('context_size=1024,n_predict=32');") != 0) goto fail;
+    memset(result, 0, sizeof(result));
+    if (exec_query_text(env, db, "SELECT llm_text_generate('Say hello in one word.');", result, sizeof(result)) != 0) goto fail;
+    if (result[0] == '\0') {
+        fprintf(stderr, "[context_kind_compatible] llm_text_generate on a chat context returned empty\n");
+        goto fail;
+    }
+
+    // so is one from the generic constructor with no embedding options
+    if (exec_expect_ok(env, db, "SELECT llm_context_create('context_size=1024,n_predict=32');") != 0) goto fail;
+    memset(result, 0, sizeof(result));
+    if (exec_query_text(env, db, "SELECT llm_text_generate('Say hello in one word.');", result, sizeof(result)) != 0) goto fail;
+    if (result[0] == '\0') {
+        fprintf(stderr, "[context_kind_compatible] llm_text_generate on a generic context returned empty\n");
+        goto fail;
+    }
+
+    // chat calls that only build in-memory state must not be gated on the context kind:
+    // llm_chat_restore() in particular drops the previous chat before it could be checked.
+    // Kept last: llm_chat_create() installs a default dist sampler on ai->sampler that
+    // outlives the context, which would make any generation after it non-deterministic.
+    if (exec_expect_ok(env, db, "SELECT llm_context_create_embedding('context_size=512,embedding_type=UINT8');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_create();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_system_prompt('You are helpful.');") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_chat_free();") != 0) goto fail;
+
+    if (exec_expect_ok(env, db, "SELECT llm_context_free();") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_model_free();") != 0) goto fail;
+
+    sqlite3_close_v2(db);
+    return assert_sqlite_memory_clean("context_kind_compatible", env);
 
 fail:
     if (db) sqlite3_close_v2(db);
@@ -2625,6 +2815,10 @@ static const test_case TESTS[] = {
     {"llm_chat_vtab", test_llm_chat_vtab},
     {"chat_error_sink_after_statement", test_chat_error_sink_after_statement},
     {"test_llm_embed_generate", test_llm_embed_generate},
+    {"context_kind_mismatch", test_context_kind_mismatch},
+    {"context_kind_compatible", test_context_kind_compatible},
+    {"context_kind_embedding_model", test_context_kind_embedding_model},
+    {"chat_vtab_without_context", test_chat_vtab_without_context},
     {"llm_embed_generate_basic", test_llm_embed_generate_basic},
     {"llm_embedding_then_chat", test_llm_embedding_then_chat},
     {"llm_context_size_errors", test_llm_context_size_errors},
@@ -2698,6 +2892,12 @@ int main(int argc, char **argv) {
                 return EXIT_FAILURE;
             }
             env.model_path = argv[i];
+        } else if (strcmp(argv[i], "--embed-model") == 0) {
+            if (++i >= argc) {
+                usage(argv[0]);
+                return EXIT_FAILURE;
+            }
+            env.embed_model_path = argv[i];
         } else if (strcmp(argv[i], "--whisper-model") == 0) {
             if (++i >= argc) {
                 usage(argv[0]);

@@ -15,6 +15,9 @@ env:
   GGUF_MODEL_DIR: tests/models/unsloth/gemma-3-270m-it-GGUF
   GGUF_MODEL_NAME: gemma-3-270m-it-UD-IQ2_M.gguf
   GGUF_MODEL_URL: https://huggingface.co/unsloth/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-UD-IQ2_M.gguf
+  EMBED_MODEL_DIR: tests/models/Mungert/all-MiniLM-L6-v2-GGUF
+  EMBED_MODEL_NAME: all-MiniLM-L6-v2-q8_0.gguf
+  EMBED_MODEL_URL: https://huggingface.co/Mungert/all-MiniLM-L6-v2-GGUF/resolve/main/all-MiniLM-L6-v2-q8_0.gguf
   WHISPER_MODEL_DIR: tests/models/ggerganov/whisper-tiny
   WHISPER_MODEL_NAME: ggml-tiny.bin
   WHISPER_MODEL_URL: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
@@ -31,6 +34,8 @@ jobs:
     outputs:
       gguf-cache-key: gguf-${{ steps.meta.outputs.gguf-hash }}
       gguf-model-path: ${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}
+      embed-cache-key: embed-${{ steps.meta.outputs.embed-hash }}
+      embed-model-path: ${{ env.EMBED_MODEL_DIR }}/${{ env.EMBED_MODEL_NAME }}
       whisper-cache-key: whisper-${{ steps.meta.outputs.whisper-hash }}
       whisper-model-path: ${{ env.WHISPER_MODEL_DIR }}/${{ env.WHISPER_MODEL_NAME }}
       audio-cache-key: audio-${{ steps.meta.outputs.audio-hash }}
@@ -43,20 +48,24 @@ jobs:
         run: |
           if command -v sha256sum >/dev/null 2>&1; then
             gguf_hash=$(echo -n "${{ env.GGUF_MODEL_URL }}" | sha256sum | cut -d' ' -f1)
+            embed_hash=$(echo -n "${{ env.EMBED_MODEL_URL }}" | sha256sum | cut -d' ' -f1)
             whisper_hash=$(echo -n "${{ env.WHISPER_MODEL_URL }}" | sha256sum | cut -d' ' -f1)
             audio_hash=$(echo -n "${{ env.AUDIO_TEST_WAV_URL }}" | sha256sum | cut -d' ' -f1)
           else
             gguf_hash=$(echo -n "${{ env.GGUF_MODEL_URL }}" | shasum -a 256 | cut -d' ' -f1)
+            embed_hash=$(echo -n "${{ env.EMBED_MODEL_URL }}" | shasum -a 256 | cut -d' ' -f1)
             whisper_hash=$(echo -n "${{ env.WHISPER_MODEL_URL }}" | shasum -a 256 | cut -d' ' -f1)
             audio_hash=$(echo -n "${{ env.AUDIO_TEST_WAV_URL }}" | shasum -a 256 | cut -d' ' -f1)
           fi
           echo "gguf-hash=$gguf_hash" >> "$GITHUB_OUTPUT"
+          echo "embed-hash=$embed_hash" >> "$GITHUB_OUTPUT"
           echo "whisper-hash=$whisper_hash" >> "$GITHUB_OUTPUT"
           echo "audio-hash=$audio_hash" >> "$GITHUB_OUTPUT"
 
       - name: Prepare directories
         run: |
           mkdir -p "${{ env.GGUF_MODEL_DIR }}"
+          mkdir -p "${{ env.EMBED_MODEL_DIR }}"
           mkdir -p "${{ env.WHISPER_MODEL_DIR }}"
           mkdir -p "${{ env.AUDIO_TEST_DIR }}"
 
@@ -73,6 +82,20 @@ jobs:
 
       - name: Verify GGUF model
         run: test -f "${{ env.GGUF_MODEL_DIR }}/${{ env.GGUF_MODEL_NAME }}"
+
+      - name: Restore embedding model cache
+        id: cache-embed
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.EMBED_MODEL_DIR }}/${{ env.EMBED_MODEL_NAME }}
+          key: embed-${{ steps.meta.outputs.embed-hash }}
+
+      - name: Download embedding model
+        if: steps.cache-embed.outputs.cache-hit != 'true'
+        run: curl -L --fail --retry 3 "${{ env.EMBED_MODEL_URL }}" -o "${{ env.EMBED_MODEL_DIR }}/${{ env.EMBED_MODEL_NAME }}"
+
+      - name: Verify embedding model
+        run: test -f "${{ env.EMBED_MODEL_DIR }}/${{ env.EMBED_MODEL_NAME }}"
 
       - name: Restore Whisper cache
         id: cache-whisper
@@ -205,6 +228,7 @@ jobs:
       - name: Prepare test asset directories
         run: |
           mkdir -p "${{ env.GGUF_MODEL_DIR }}"
+          mkdir -p "${{ env.EMBED_MODEL_DIR }}"
           mkdir -p "${{ env.WHISPER_MODEL_DIR }}"
           mkdir -p "${{ env.AUDIO_TEST_DIR }}"
 
@@ -213,6 +237,12 @@ jobs:
         with:
           path: ${{ needs.download-models.outputs.gguf-model-path }}
           key: ${{ needs.download-models.outputs.gguf-cache-key }}
+
+      - name: Restore embedding model cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ needs.download-models.outputs.embed-model-path }}
+          key: ${{ needs.download-models.outputs.embed-cache-key }}
 
       - name: Restore Whisper cache
         uses: actions/cache@v4
