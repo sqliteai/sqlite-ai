@@ -15,6 +15,7 @@
 
 #include <stdio.h>
 #include <ctype.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -75,6 +76,8 @@ bool buffer_create (buffer_t *b, uint32_t size) {
 }
 
 bool buffer_resize (buffer_t *b, uint32_t new_capacity) {
+    // sqlite3_realloc takes an int: a larger value would be read as <= 0 and free b->data
+    if (new_capacity > INT_MAX) return false;
     char *clone = sqlite3_realloc(b->data, new_capacity);
     if (!clone) return false;
     
@@ -90,9 +93,10 @@ void buffer_reset (buffer_t *b) {
 }
 
 bool buffer_append (buffer_t *b, const char *data, uint32_t len, bool zero_terminate) {
-    if (b->length + len + 1> b->capacity) {
-        uint32_t new_capacity = b->length + len + 1 + MIN_BUFFER_SIZE;
-        if (buffer_resize(b, new_capacity) == false) return false;
+    if ((uint64_t)b->length + len + 1 > b->capacity) {
+        uint64_t new_capacity = (uint64_t)b->length + len + 1 + MIN_BUFFER_SIZE;
+        if (new_capacity > INT_MAX) return false;
+        if (buffer_resize(b, (uint32_t)new_capacity) == false) return false;
     }
     
     memcpy(b->data + b->length, data, len);
@@ -349,7 +353,7 @@ char *sqlite_strdup (const char *str) {
     if (!str) return NULL;
     
     size_t len = strlen(str) + 1;
-    char *result = (char*)sqlite3_malloc((int)len);
+    char *result = (char*)sqlite3_malloc64(len);
     if (result) memcpy(result, str, len);
     
     return result;
