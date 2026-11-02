@@ -171,10 +171,12 @@ function main() {
 
   const [version, artifactsDir, outputDir] = args;
 
-  // Find LICENSE.md (should be in repo root)
-  const licensePath = path.resolve(__dirname, '../../LICENSE.md');
-  if (!fs.existsSync(licensePath)) {
-    console.error(`Error: LICENSE.md not found at ${licensePath}`);
+  // Find the license (should be in repo root, as LICENSE or the older LICENSE.md)
+  const licensePath = ['LICENSE', 'LICENSE.md']
+    .map(name => path.resolve(__dirname, '../..', name))
+    .find(candidate => fs.existsSync(candidate));
+  if (!licensePath) {
+    console.error(`Error: LICENSE or LICENSE.md not found in ${path.resolve(__dirname, '../..')}`);
     process.exit(1);
   }
 
