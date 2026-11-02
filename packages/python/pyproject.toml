@@ -10,8 +10,8 @@ authors = [
     { name = "SQLite AI Team" }
 ]
 readme = "README.md"
-license = "LicenseRef-Elastic-2.0-Modified-For-Open-Source-Use"
-license-files = ["LICENSE.md"]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3"
 
 [project.urls]

@@ -1,7 +1,7 @@
 # @sqliteai/sqlite-ai
 
 [![npm version](https://badge.fury.io/js/@sqliteai%2Fsqlite-ai.svg)](https://www.npmjs.com/package/@sqliteai/sqlite-ai)
-[![License](https://img.shields.io/badge/license-Elastic%202.0-blue.svg)](LICENSE.md)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 > SQLite AI extension packaged for Node.js
 
@@ -142,9 +142,7 @@ Error thrown when the SQLite AI extension cannot be found for the current platfo
 
 ## License
 
-This project is licensed under the [Elastic License 2.0](LICENSE.md).
-
-For production or managed service use, please [contact SQLite Cloud, Inc](mailto:info@sqlitecloud.io) for a commercial license.
+This project is licensed under the [Apache License 2.0](LICENSE).
 
 ## Contributing
 

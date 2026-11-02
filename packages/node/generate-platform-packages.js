@@ -91,7 +91,7 @@ function generatePackageJson(platform, version) {
       platform.binaryName,
       'index.js',
       'README.md',
-      'LICENSE.md',
+      'LICENSE',
     ],
     keywords: [
       'sqlite',
@@ -99,7 +99,7 @@ function generatePackageJson(platform, version) {
       ...platform.name.split('-'),
     ],
     author: 'Gioele Cantoni (gioele@sqlitecloud.io)',
-    license: 'SEE LICENSE IN LICENSE.md',
+    license: 'Apache-2.0',
     repository: {
       type: 'git',
       url: 'https://github.com/sqliteai/sqlite-ai.git',
@@ -153,7 +153,7 @@ npm install @sqliteai/sqlite-ai
 
 ## License
 
-See [LICENSE.md](./LICENSE.md) in the root directory.
+See [LICENSE](./LICENSE) in the root directory (Apache License 2.0).
 `;
 }
 
@@ -171,12 +171,10 @@ function main() {
 
   const [version, artifactsDir, outputDir] = args;
 
-  // Find the license (should be in repo root, as LICENSE or the older LICENSE.md)
-  const licensePath = ['LICENSE', 'LICENSE.md']
-    .map(name => path.resolve(__dirname, '../..', name))
-    .find(candidate => fs.existsSync(candidate));
-  if (!licensePath) {
-    console.error(`Error: LICENSE or LICENSE.md not found in ${path.resolve(__dirname, '../..')}`);
+  // Find LICENSE (should be in repo root)
+  const licensePath = path.resolve(__dirname, '../../LICENSE');
+  if (!fs.existsSync(licensePath)) {
+    console.error(`Error: LICENSE not found at ${licensePath}`);
     process.exit(1);
   }
 
@@ -221,8 +219,8 @@ function main() {
       const readme = generateReadme(platform, version);
       fs.writeFileSync(path.join(platformDir, 'README.md'), readme);
 
-      // Copy LICENSE.md
-      fs.copyFileSync(licensePath, path.join(platformDir, 'LICENSE.md'));
+      // Copy LICENSE
+      fs.copyFileSync(licensePath, path.join(platformDir, 'LICENSE'));
 
       // Copy binary if it exists
       if (fs.existsSync(artifactPath)) {
