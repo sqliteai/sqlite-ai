@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.10
+
+### Fixed
+- Release pipeline: the license moved from `LICENSE.md` to `LICENSE` (Apache 2.0), which broke the npm platform-package generator and left the `packages/*` license symlinks dangling. The generator, the symlinks and the npm, PyPI, Flutter and Android package metadata now reference `LICENSE` and Apache-2.0 instead of `LICENSE.md` and the Elastic License 2.0. 1.0.9 failed at the npm step, so its GitHub release and npm packages were never published; 1.0.10 carries the same code.
+
 ## 1.0.9
 
 ### Security
