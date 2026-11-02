@@ -814,7 +814,14 @@ static int test_llm_embedding_then_chat(const test_env *env) {
     char sqlbuf[512];
     snprintf(sqlbuf, sizeof(sqlbuf), "SELECT llm_model_load('%s');", model);
     if (exec_expect_ok(env, db, sqlbuf) != 0) goto fail;
-    if (install_seeded_chat_sampler(env, db) != 0) goto fail;
+    // same chain as install_seeded_chat_sampler() plus a repetition penalty: without it the
+    // small test model can fall into a "I do not know what it is." loop that fills the
+    // 1024-token context, which is a model quirk and not what this test is about
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_create();")                       != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_penalties(64, 1.1, 0.0, 0.0);") != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_min_p(0.05, 1);")            != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_temp(0.8);")                 != 0) goto fail;
+    if (exec_expect_ok(env, db, "SELECT llm_sampler_init_dist(7);")                   != 0) goto fail;
 
     if (exec_expect_ok(env, db, "SELECT llm_context_create_embedding('embedding_type=UINT8');") != 0) goto fail;
     if (exec_expect_ok(env, db, "SELECT llm_embed_generate('document text for embeddings');") != 0) goto fail;
