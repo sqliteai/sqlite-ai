@@ -3032,6 +3032,18 @@ static void llm_context_free (sqlite3_context *context, int argc, sqlite3_value 
     ai_context_release((ai_context *)sqlite3_user_data(context));
 }
 
+// "<arch>.attention.causal" is false for encoder-only embedding models (BERT and friends)
+static bool llm_model_is_causal (const struct llama_model *model) {
+    char arch[64] = {0};
+    if (llama_model_meta_val_str(model, "general.architecture", arch, sizeof(arch)) <= 0) return true;
+    
+    char key[128];
+    snprintf(key, sizeof(key), "%s.attention.causal", arch);
+    char value[16] = {0};
+    if (llama_model_meta_val_str(model, key, value, sizeof(value)) <= 0) return true;
+    return strcmp(value, "false") != 0;
+}
+
 static bool llm_context_create_with_options (sqlite3_context *context, ai_context *ai, const char *options1, const char *options2) {
     struct llama_context_params ctx_params = llama_context_default_params();
 
@@ -3076,9 +3088,15 @@ static bool llm_context_create_with_options (sqlite3_context *context, ai_contex
         if ((int)ctx_params.n_batch > (int)ctx_params.n_ctx && ctx_params.n_ctx > 0) {
             ctx_params.n_batch = ctx_params.n_ctx;
         }
-        // non-causal models need n_ubatch >= the whole input: always tie it to n_batch, also
-        // when context_size raised n_batch after generate_embedding had copied the old one
-        ctx_params.n_ubatch = ctx_params.n_batch;
+        // non-causal models (BERT-like) need n_ubatch >= the whole input: tie it to n_batch, also
+        // when context_size raised n_batch after generate_embedding had copied the old one.
+        // Causal models only need it not to exceed n_batch: a ubatch as large as a huge n_ctx
+        // makes the compute buffers explode on backends without flash attention.
+        if (!llm_model_is_causal(ai->model)) {
+            ctx_params.n_ubatch = ctx_params.n_batch;
+        } else if ((int)ctx_params.n_ubatch > (int)ctx_params.n_batch) {
+            ctx_params.n_ubatch = ctx_params.n_batch;
+        }
     }
 
     struct llama_context *ctx = llama_init_from_model(ai->model, ctx_params);
